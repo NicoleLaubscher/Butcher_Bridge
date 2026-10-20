@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="ButcherBridge buying-group decision support for township meat retailers." />
+    <title>ButcherBridge Decision Support</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#workspace" aria-label="ButcherBridge home">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span><strong>ButcherBridge</strong><small>Buying-group decision support</small></span>
+        </a>
+        <div class="topbar-actions">
+          <span class="privacy-note"><span class="lock-dot"></span> Private workspace · saved in this browser</span>
+          <button class="button button-ghost" id="reset-data" type="button">Restore example</button>
+          <button class="button button-primary" id="run-analysis" type="button">Run comparison</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="page-title">
+          <div>
+            <span class="eyebrow">Procurement planning workspace</span>
+            <h1 id="page-title">Turn fragmented demand into a feasible group order.</h1>
+            <p>Aggregate retailer commitments, test supplier constraints, and choose the lowest feasible landed cost without missing required dates.</p>
+          </div>
+          <div class="workflow" aria-label="Decision workflow">
+            <span class="active"><b>1</b> Capture</span><i></i>
+            <span><b>2</b> Test</span><i></i>
+            <span><b>3</b> Compare</span>
+          </div>
+        </section>
+
+        <section id="workspace" class="section-block" aria-labelledby="workspace-title">
+          <div class="section-heading">
+            <div>
+              <span class="section-number">01 · INPUTS</span>
+              <h2 id="workspace-title">Build the order scenario</h2>
+            </div>
+            <div class="scenario-settings">
+              <label>Order window opens<input id="order-date" type="date" /></label>
+              <label>Product to analyse<select id="product-select"></select></label>
+            </div>
+          </div>
+
+          <div id="validation-banner" class="validation-banner" role="alert" hidden></div>
+
+          <div class="input-panel">
+            <div class="panel-head">
+              <div><span class="panel-icon retailer-icon">R</span><div><h3>Retailer demand</h3><p>Commitments become visible when they join the order window.</p></div></div>
+              <button class="button button-secondary" id="add-demand" type="button">+ Add retailer</button>
+            </div>
+            <div class="table-wrap">
+              <table class="input-table demand-table">
+                <thead><tr><th>Retailer</th><th>Product</th><th>Demand (kg)</th><th>Area</th><th>Required by</th><th>Joins in</th><th>Own trip/admin</th><th><span class="sr-only">Remove</span></th></tr></thead>
+                <tbody id="demand-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="input-panel">
+            <div class="panel-head">
+              <div><span class="panel-icon supplier-icon">S</span><div><h3>Supplier quotations</h3><p>Use comma-separated areas or “All”; enter tiers as minimum kg:price/kg.</p></div></div>
+              <button class="button button-secondary" id="add-supplier" type="button">+ Add supplier</button>
+            </div>
+            <div class="table-wrap">
+              <table class="input-table supplier-table">
+                <thead><tr><th>Supplier</th><th>Product</th><th>Service areas</th><th>Capacity (kg)</th><th>Lead time</th><th>Fixed fulfilment</th><th>Variable / kg</th><th>Price tiers</th><th><span class="sr-only">Remove</span></th></tr></thead>
+                <tbody id="supplier-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="results" class="section-block results-section" aria-labelledby="results-title">
+          <div class="section-heading results-heading">
+            <div>
+              <span class="section-number">02 · DECISION</span>
+              <h2 id="results-title">Feasibility and purchasing comparison</h2>
+            </div>
+            <div id="recommendation-chip" class="recommendation-chip"></div>
+          </div>
+
+          <div id="empty-results" class="empty-state" hidden>
+            <span>0 kg</span><h3>No committed demand in this window</h3><p>Increase the consolidation window or add a retailer whose “joins in” value falls inside it.</p>
+          </div>
+
+          <div id="results-content">
+            <div id="kpi-grid" class="kpi-grid"></div>
+
+            <div class="decision-grid">
+              <article class="card comparison-card">
+                <div class="card-head"><div><span class="card-kicker">RECOMMENDED OPTION</span><h3 id="comparison-title">Purchasing comparison</h3></div><span id="savings-badge" class="savings-badge"></span></div>
+                <div id="comparison-bars" class="comparison-bars"></div>
+                <div id="comparison-detail" class="comparison-detail"></div>
+              </article>
+              <article class="card tier-card">
+                <div class="card-head"><div><span class="card-kicker">DEMAND VISIBILITY</span><h3>Price-tier progress</h3></div><span id="tier-status" class="status-dot"></span></div>
+                <div id="tier-progress" class="tier-progress"></div>
+                <div id="order-summary" class="order-summary"></div>
+              </article>
+            </div>
+
+            <article class="card feasibility-card">
+              <div class="card-head"><div><span class="card-kicker">CONSTRAINT CHECK</span><h3>Supplier feasibility</h3></div><span class="legend"><i class="pass"></i> Feasible <i class="fail"></i> Blocked</span></div>
+              <div class="table-wrap"><table class="result-table"><thead><tr><th>Supplier</th><th>Capacity</th><th>Area</th><th>Arrival</th><th>Applied tier</th><th>Fulfilment / kg</th><th>Landed / kg</th><th>Decision</th></tr></thead><tbody id="feasibility-body"></tbody></table></div>
+            </article>
+
+            <details class="card individual-card">
+              <summary><span><span class="card-kicker">INDIVIDUAL BASELINE</span><strong>Best separate order for each retailer</strong></span><span>View details <b>⌄</b></span></summary>
+              <div class="table-wrap"><table class="result-table"><thead><tr><th>Retailer</th><th>Demand</th><th>Best supplier</th><th>Applied price</th><th>Trip/admin</th><th>Landed / kg</th><th>Arrival</th></tr></thead><tbody id="individual-body"></tbody></table></div>
+            </details>
+          </div>
+        </section>
+
+        <section id="tradeoff" class="section-block tradeoff-section" aria-labelledby="tradeoff-title">
+          <div class="section-heading tradeoff-heading">
+            <div>
+              <span class="section-number">03 · TRADE-OFF</span>
+              <h2 id="tradeoff-title">Balance lower cost with required delivery dates</h2>
+              <p>Waiting can unlock more demand and better tiers, but leaves fewer days for fulfilment.</p>
+            </div>
+            <div class="window-control">
+              <label for="wait-days">Consolidation window</label>
+              <output id="wait-output">5 days</output>
+              <input id="wait-days" type="range" min="0" max="14" step="1" value="5" />
+              <div><span>Order now</span><span>Wait 14 days</span></div>
+            </div>
+          </div>
+          <div class="tradeoff-grid">
+            <article class="card chart-card">
+              <div class="card-head"><div><span class="card-kicker">SCENARIO CURVE</span><h3>Landed cost across order windows</h3></div><span class="chart-key"><i></i> Feasible cost/kg</span></div>
+              <div id="tradeoff-chart" class="tradeoff-chart" role="img" aria-label="Landed cost by consolidation wait days"></div>
+            </article>
+            <article class="card insight-card" id="tradeoff-insight"></article>
+          </div>
+          <footer><span>ButcherBridge</span><p>Expected and evaluated impact · compare outcomes against the recorded baseline.</p><button id="export-scenario" class="text-button" type="button">Export scenario JSON ↓</button></footer>
+        </section>
+      </main>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "butcherbridge-decision-support",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "test": "node --test tests/engine.test.mjs",
+    "start": "node server.mjs",
+    "serve": "node server.mjs"
+  }
+}
