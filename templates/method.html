@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}Model methodology | ButcherBridge{% endblock %}
+{% block content %}
+<section class="hero"><p class="eyebrow">THE METHOD</p><h1>How our calculations work</h1><p>Seven straightforward supply-chain calculations. See calculations.py for formulas, assumptions and input validation.</p></section>
+<section class="panel"><h2>Procurement decision model</h2><div class="formula-grid">
+<article><h3>1. Aggregated demand</h3><code>Q = q1 + q2 + ... + qn</code><p>Add compatible retailer orders to calculate group demand.</p></article>
+<article><h3>2. Volume price tiers</h3><code>P(Q) = qualifying supplier price</code><p>Use the rate for the highest quantity threshold met.</p></article>
+<article><h3>3. Total landed cost</h3><code>TC = Q × P + F + Q × V + H</code><p>Include meat, fixed delivery, variable delivery and handling.</p></article>
+<article><h3>4. Landed cost/kg</h3><code>LC = TC / Q</code><p>Compare suppliers on real delivered cost per kilogram.</p></article>
+<article><h3>5. Savings</h3><code>S = (Old − New) / Old × 100</code><p>Compare recommended costs with a stated baseline.</p></article>
+<article><h3>6. Feasibility</h3><code>Capacity ≥ Q; lead time ≤ days; fill rate ≥ minimum</code><p>Reject suppliers unable to meet order or service requirements.</p></article>
+<article><h3>7. Shared fixed costs</h3><code>Share = F × (retailer kg / group kg)</code><p>Distribute fixed group delivery costs proportionally.</p></article>
+</div><p class="note">Demonstration assumptions: one compatible beef product, quantities in kg, money in ZAR, and illustrative supplier terms. Taxes, quality differences and geographical constraints are not modelled yet.</p></section>
+{% endblock %}

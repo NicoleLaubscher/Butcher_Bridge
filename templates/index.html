@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard | ButcherBridge{% endblock %}
+{% block content %}
+<section class="hero"><p class="eyebrow">SUPPLY CHAIN DECISION SUPPORT</p>
+  <h1>Better buying, together.</h1>
+  <p>Combine compatible butchery orders, compare suppliers and calculate real delivered costs.</p></section>
+<section class="metrics" aria-label="Overview">
+  <div class="metric"><span>Retailer orders</span><strong>{{ orders|length }}</strong><small>Example participants</small></div>
+  <div class="metric"><span>Combined demand</span><strong>{{ '%g'|format(quantity) }} kg</strong><small>Same product: beef</small></div>
+  <div class="metric"><span>Suppliers compared</span><strong>{{ suppliers|length }}</strong><small>Capacity and delivery checked</small></div>
+  <div class="metric"><span>Potential savings</span><strong>{% if savings is not none %}{{ '%.1f'|format(savings) }}%{% else %}—{% endif %}</strong><small>Against sample baseline</small></div>
+</section>
+<div class="two-col"><section class="panel"><h2>Group orders</h2><p class="muted">Confirmed demonstration orders for the same beef specification.</p>
+  <div class="table-scroll"><table><caption class="sr-only">Example retailer orders</caption><thead><tr><th scope="col">Retailer</th><th scope="col">Product</th><th scope="col">Quantity</th></tr></thead><tbody>
+  {% for order in orders %}<tr><td>{{ order.retailer }}</td><td>{{ order.product }}</td><td>{{ '%g'|format(order.quantity_kg) }} kg</td></tr>{% endfor %}
+  </tbody></table></div></section>
+<section class="panel"><h2>Try a quantity</h2><p class="muted">Explore how order size changes price tiers and feasibility.</p>
+  <form method="post"><label for="quantity">Order quantity (kg)</label><input id="quantity" name="quantity" type="number" min="1" step="0.01" value="{{ '%g'|format(quantity) }}" required aria-describedby="quantity-help"><p class="hint" id="quantity-help">Enter a positive quantity. Results use fictional supplier data.</p><button type="submit">Compare suppliers →</button></form>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  {% if recommended %}<div class="recommend"><span>Lowest-cost eligible supplier</span><strong>{{ recommended.name }}</strong><p>Total: R{{ '%.2f'|format(recommended.total_cost) }} · R{{ '%.2f'|format(recommended.landed_per_kg) }}/kg</p></div>{% endif %}
+</section></div>
+<section class="panel"><div class="section-heading"><div><h2>Supplier comparison</h2><p class="muted">Total landed cost includes meat, delivery and handling. Ineligible suppliers cannot be recommended.</p></div></div>
+  <div class="table-scroll"><table><caption class="sr-only">Supplier results</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Meat price</th><th scope="col">Delivered total</th><th scope="col">Cost/kg</th><th scope="col">Status</th></tr></thead><tbody>
+  {% for s in suppliers %}<tr><td><strong>{{ s.name }}</strong></td><td>{% if s.price is not none %}R{{ '%.2f'|format(s.price) }}{% else %}—{% endif %}</td><td>{% if s.total_cost is not none %}R{{ '%.2f'|format(s.total_cost) }}{% else %}—{% endif %}</td><td>{% if s.landed_per_kg is not none %}R{{ '%.2f'|format(s.landed_per_kg) }}{% else %}—{% endif %}</td><td><span class="status {% if not s.eligible %}not-ok{% endif %}">{{ 'Eligible' if s.eligible else 'Not eligible' }}</span><small class="detail">{{ s.reason }}</small></td></tr>{% endfor %}
+  </tbody></table></div></section>
+<p class="note">Note: These comparisons are illustrative. Real orders must use matching product specifications, correct delivery areas and actual supplier quotes.</p>
+{% endblock %}
