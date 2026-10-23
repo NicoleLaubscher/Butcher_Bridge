@@ -23,5 +23,41 @@
   <div class="table-scroll"><table><caption class="sr-only">Supplier results</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Meat price</th><th scope="col">Delivered total</th><th scope="col">Cost/kg</th><th scope="col">Status</th></tr></thead><tbody>
   {% for s in suppliers %}<tr><td><strong>{{ s.name }}</strong></td><td>{% if s.price is not none %}R{{ '%.2f'|format(s.price) }}{% else %}—{% endif %}</td><td>{% if s.total_cost is not none %}R{{ '%.2f'|format(s.total_cost) }}{% else %}—{% endif %}</td><td>{% if s.landed_per_kg is not none %}R{{ '%.2f'|format(s.landed_per_kg) }}{% else %}—{% endif %}</td><td><span class="status {% if not s.eligible %}not-ok{% endif %}">{{ 'Eligible' if s.eligible else 'Not eligible' }}</span><small class="detail">{{ s.reason }}</small></td></tr>{% endfor %}
   </tbody></table></div></section>
+<section class="panel baseline">
+  <p class="eyebrow">BASELINE COMPARISON <span class="lower">Lower is better</span></p>
+  <h2>Total procurement cost per kilogram</h2>
+  {% for b in bars %}
+  <div class="bar-row">
+    <span class="bar-label">{{ b.label }}</span>
+    <div class="bar-track"><div class="bar-fill {{ b.kind }}" style="width: {{ b.pct }}%"></div></div>
+    <strong class="bar-value">R{{ '%.2f'|format(b.value) }}</strong>
+  </div>
+  {% endfor %}
+</section>
+<section class="panel perf">
+  <p class="eyebrow">POST-ORDER PERFORMANCE MEASUREMENT</p>
+  <h2>How the last group order performed</h2>
+  <p class="muted">Planned vs actual results for a completed order (demonstration data).</p>
+  <div class="metrics">
+    <div class="metric"><span>Fill rate</span><strong>{{ perf.fill }}%</strong><small>Delivered vs ordered kg</small></div>
+    <div class="metric"><span>On-time delivery</span><strong>{{ perf.on_time }}%</strong><small>Within planned lead time</small></div>
+    <div class="metric"><span>On time &amp; in full</span><strong>{{ perf.otif }}%</strong><small>Both targets met</small></div>
+    <div class="metric"><span>Cost variance</span><strong>{{ '%+.1f'|format(perf.variance) }}%</strong><small>Actual vs quoted</small></div>
+  </div>
+  <div class="table-scroll"><table><caption class="sr-only">Post-order performance</caption>
+    <thead><tr><th scope="col">Retailer</th><th scope="col">Ordered / delivered</th><th scope="col">Fill rate</th><th scope="col">Days (plan / actual)</th><th scope="col">Quoted</th><th scope="col">Actual</th><th scope="col">Variance</th><th scope="col">Result</th></tr></thead>
+    <tbody>
+    {% for r in perf_rows %}<tr>
+      <td><strong>{{ r.retailer }}</strong></td>
+      <td>{{ '%g'|format(r.ordered_kg) }} / {{ '%g'|format(r.delivered_kg) }} kg</td>
+      <td>{{ r.fill_rate }}%</td>
+      <td>{{ r.planned_days }} / {{ r.actual_days }}</td>
+      <td>R{{ '%.2f'|format(r.quoted_cost) }}</td>
+      <td>R{{ '%.2f'|format(r.actual_cost) }}</td>
+      <td class="{{ 'bad' if r.variance > 0 else 'good' }}">{{ '%+.1f'|format(r.variance) }}%</td>
+      <td><span class="status {% if not r.otif %}not-ok{% endif %}">{{ 'On time & in full' if r.otif else 'Missed target' }}</span></td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+</section>
 <p class="note">Note: These comparisons are illustrative. Real orders must use matching product specifications, correct delivery areas and actual supplier quotes.</p>
 {% endblock %}
