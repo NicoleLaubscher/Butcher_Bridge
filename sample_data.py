@@ -15,3 +15,14 @@ SUPPLIERS = [
      "fill_rate": .99, "price_tiers": [(1, 89), (300, 80)],
      "delivery": 200, "variable_delivery": 0, "handling": 100},
 ]
+
+DELIVERIES = [
+    {"retailer": "Northside Butchery", "ordered_kg": 100, "delivered_kg": 100,
+     "planned_days": 3, "actual_days": 3, "quoted_cost": 8450, "actual_cost": 8450},
+    {"retailer": "Market Butchery", "ordered_kg": 150, "delivered_kg": 148,
+     "planned_days": 3, "actual_days": 4, "quoted_cost": 12675, "actual_cost": 12900},
+    {"retailer": "Family Meats", "ordered_kg": 250, "delivered_kg": 250,
+     "planned_days": 3, "actual_days": 3, "quoted_cost": 21125, "actual_cost": 21125},
+]
+
+

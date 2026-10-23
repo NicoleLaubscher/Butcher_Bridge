@@ -185,3 +185,41 @@ def share_fixed_cost(fixed_cost, retailer_kg, group_kg):
     if q > group:
         raise ValueError("Retailer quantity cannot exceed group demand")
     return round(f * q / group, 2)
+
+def fill_rate_actual(delivered_kg, ordered_kg):
+    """FORMULA 8 - Actual fill rate (%): delivered / ordered x 100."""
+    d = check_non_negative(delivered_kg, "delivered quantity")
+    o = check_positive(ordered_kg, "ordered quantity")
+    return round(d / o * 100, 1)
+
+
+def delivered_on_time(planned_days, actual_days):
+    """FORMULA 9 - On-time delivery: True if actual days <= planned days."""
+    planned = check_non_negative(planned_days, "planned days")
+    actual = check_non_negative(actual_days, "actual days")
+    return actual <= planned
+
+
+def cost_variance_pct(quoted_cost, actual_cost):
+    """FORMULA 10 - Cost variance (%): (actual - quoted) / quoted x 100.
+
+    Positive = over budget, negative = under budget.
+    """
+    quoted = check_positive(quoted_cost, "quoted cost")
+    actual = check_non_negative(actual_cost, "actual cost")
+    return round((actual - quoted) / quoted * 100, 1)
+
+
+def post_order_performance(retailer, ordered_kg, delivered_kg, planned_days,
+                           actual_days, quoted_cost, actual_cost,
+                           minimum_fill_rate=95):
+    """Combine formulas 8-10 and add OTIF (on time AND in full)."""
+    fill = fill_rate_actual(delivered_kg, ordered_kg)
+    on_time = delivered_on_time(planned_days, actual_days)
+    return {"retailer": retailer, "ordered_kg": ordered_kg,
+            "delivered_kg": delivered_kg, "planned_days": planned_days,
+            "actual_days": actual_days, "quoted_cost": quoted_cost,
+            "actual_cost": actual_cost, "fill_rate": fill,
+            "on_time": on_time,
+            "otif": on_time and fill >= minimum_fill_rate,
+            "variance": cost_variance_pct(quoted_cost, actual_cost)}
