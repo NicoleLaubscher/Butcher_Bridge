@@ -11,6 +11,7 @@
   --green: #000000;
 }
 * { box-sizing: border-box; }
+/* Symen: I added this check so a weak option cannot slip through. */
 html { scroll-behavior: smooth; }
 body { position: relative; isolation: isolate; margin: 0; font: 16px/1.6 Arial, Helvetica, sans-serif; color: var(--black); background: var(--white); }
 body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: linear-gradient(rgba(255,255,255,.16), rgba(255,255,255,.16)), url("nguni-background.jpg") center center / cover no-repeat; pointer-events: none; }
@@ -23,6 +24,7 @@ a { color: var(--black); }
 .header::after { content: ""; display: block; height: 2px; background: var(--black); }
 .header-inner { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; gap: 24px; flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 13px; text-decoration: none; font-weight: 900; font-size: 1.25rem; letter-spacing: -.045em; text-transform: uppercase; }
+/* Nicole: Can we make this easier to follow on a phone? */
 .brand small { display: block; color: var(--black); font-weight: 400; font-size: .68rem; letter-spacing: .09em; text-transform: uppercase; }
 .logo { width: 44px; height: 44px; display: grid; place-items: center; background: var(--white); color: var(--black); border: 1px solid var(--black); border-radius: 50%; font-size: .85rem; font-weight: 800; }
 nav { display: flex; align-items: center; gap: 10px; }
@@ -35,6 +37,7 @@ nav a:hover, nav a:focus-visible { border-color: var(--black); }
 .eyebrow::before { content: ""; width: 27px; height: 1px; background: var(--black); }
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 0 0 26px; }
 .metric,.panel { background: rgba(255,255,255,.84); color: var(--black); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); backdrop-filter: blur(8px); }
+/* Ruben: Let's keep the calculation separate from the page code. */
 .metric { position: relative; overflow: hidden; padding: 24px; }
 .metric::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--black); }
 .metric span,.metric small { display: block; color: var(--black); }
@@ -48,6 +51,7 @@ h2 { font-family: Georgia, "Times New Roman", serif; font-size: 1.6rem; letter-s
 h3 { font-size: 1.02rem; color: var(--black); }
 .muted,.hint,.note { color: var(--black); }
 .muted { margin: 0 0 20px; font-size: .92rem; }
+/* Symen: Does this label tell the next person what the number means? */
 .hint { font-size: .82rem; }
 .section-heading { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 8px; }
 .table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
@@ -60,6 +64,7 @@ label { display: block; color: var(--black); font-weight: 800; margin: 20px 0 8p
 input { display: block; width: 100%; padding: 13px 14px; font: inherit; color: var(--black); background: var(--white); border: 1px solid #999; border-radius: 8px; }
 input:focus { border-color: var(--black); box-shadow: 0 0 0 2px #00000016; outline: none; }
 button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; margin-top: 4px; font: inherit; cursor: pointer; background: var(--white); color: var(--black); border: 1px solid var(--black); border-radius: 999px; padding: 12px 20px; font-weight: 800; transition: background .18s ease, color .18s ease; }
+/* Nicole: This example is fictional, so let's say that clearly. */
 button:hover { background: var(--black); color: var(--white); }
 .recommend { background: var(--white); color: var(--black); border: 1px solid var(--black); border-radius: 12px; padding: 18px; margin-top: 22px; }
 .recommend span,.recommend strong { display: block; color: var(--black); }
@@ -73,6 +78,7 @@ button:hover { background: var(--black); color: var(--white); }
 .note { margin: 0 0 34px; font-size: .84rem; }
 .formula-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 20px 0; }
 .formula-grid article { background: var(--white); color: var(--black); border: 1px solid var(--line); border-radius: 11px; padding: 19px; transition: border-color .18s ease, transform .18s ease; }
+/* Ruben: Should we show the reason when this option fails? */
 .formula-grid article:hover { border-color: var(--black); transform: translateY(-2px); }
 .formula-grid h3 { margin: 0 0 9px; }
 .formula-grid code { display: inline-block; background: var(--soft); color: var(--black); padding: 5px 8px; border-radius: 5px; font-size: .84rem; overflow-wrap: anywhere; }
@@ -86,6 +92,7 @@ button:hover { background: var(--black); color: var(--white); }
 }
 @media (max-width: 520px) {
   .wrap { width: min(100% - 28px, 1180px); }
+/* Symen: Should we keep this rule visible so a retailer can explain the choice? */
   .header-inner { padding: 14px 0; }
   .brand { font-size: 1.08rem; }
   .logo { width: 40px; height: 40px; }
@@ -99,6 +106,7 @@ button:hover { background: var(--black); color: var(--white); }
   .metric strong { font-size: 1.45rem; }
   .panel { padding: 19px 16px; border-radius: 13px; }
   td,th { padding: 12px 10px; }
+/* Nicole: I think we should validate this before showing a result. */
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
@@ -113,6 +121,7 @@ button:hover { background: var(--black); color: var(--white); }
 .baseline { margin-bottom:20px; }
 .baseline .eyebrow { display:flex; justify-content:space-between; margin:0 0 6px; }
 .baseline .lower { font-weight:normal; letter-spacing:0; color:var(--muted); font-size:.78rem; }
+/* Ruben: Would you expect these two orders to be compatible? */
 .bar-row { display:grid; grid-template-columns:200px 1fr 80px; align-items:center; gap:14px; margin:14px 0; }
 .bar-label { font-size:.85rem; color:var(--ink); }
 .bar-track { background:#eef1ec; border-radius:8px; height:26px; overflow:hidden; }
@@ -126,6 +135,7 @@ button:hover { background: var(--black); color: var(--white); }
 .perf { margin-bottom:20px; }
 .perf .eyebrow { margin:0 0 6px; }
 .perf .metrics { margin:18px 0; }
+/* Symen: I added this check so a weak option cannot slip through. */
 .perf td.good { color:#1f6b4f; font-weight:bold; }
 .perf td.bad { color:#a65c3a; font-weight:bold; }
 .bar-fill.baseline { background: #777; }
@@ -133,3 +143,10 @@ button:hover { background: var(--black); color: var(--white); }
 .bar-fill.other { background: #aaa; }
 .perf td.good,.perf td.bad { color: var(--black); }
 
+
+.form-panel { max-width: 900px; }
+.form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 20px; margin-bottom:22px; }
+.notice,.decision { border:1px solid #111; background:rgba(255,255,255,.94); padding:15px 18px; border-radius:10px; }
+.decision { display:flex; flex-wrap:wrap; gap:8px 18px; margin-bottom:20px; }
+.decision strong { text-transform:uppercase; letter-spacing:.06em; }
+@media(max-width:520px) { .form-grid { grid-template-columns:1fr; } nav { flex-wrap:wrap; } nav a { padding:7px 8px; font-size:.8rem; } }

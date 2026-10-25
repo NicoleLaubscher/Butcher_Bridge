@@ -1,18 +1,20 @@
-{% extends 'base.html' %}
+{% extends 'shared_page_layout.html' %}
 {% block title %}Dashboard | ButcherBridge{% endblock %}
 {% block content %}
 <section class="hero"><p class="eyebrow">SUPPLY CHAIN DECISION SUPPORT</p>
   <h1>Better buying, together.</h1>
-  <p>Combine compatible butchery orders, compare suppliers and calculate real delivered costs.</p></section>
+  <p>Check compatible demand, compare feasible supplier options and test whether group buying lowers total delivered cost.</p></section>
 <section class="metrics" aria-label="Overview">
   <div class="metric"><span>Retailer orders</span><strong>{{ orders|length }}</strong><small>Example participants</small></div>
+<!-- Ruben: Should we show the reason when this option fails? -->
   <div class="metric"><span>Combined demand</span><strong>{{ '%g'|format(quantity) }} kg</strong><small>Same product: beef</small></div>
   <div class="metric"><span>Suppliers compared</span><strong>{{ suppliers|length }}</strong><small>Capacity and delivery checked</small></div>
   <div class="metric"><span>Potential savings</span><strong>{% if savings is not none %}{{ '%.1f'|format(savings) }}%{% else %}—{% endif %}</strong><small>Against sample baseline</small></div>
 </section>
 <div class="two-col"><section class="panel"><h2>Group orders</h2><p class="muted">Confirmed demonstration orders for the same beef specification.</p>
   <div class="table-scroll"><table><caption class="sr-only">Example retailer orders</caption><thead><tr><th scope="col">Retailer</th><th scope="col">Product</th><th scope="col">Quantity</th></tr></thead><tbody>
-  {% for order in orders %}<tr><td>{{ order.retailer }}</td><td>{{ order.product }}</td><td>{{ '%g'|format(order.quantity_kg) }} kg</td></tr>{% endfor %}
+  {% for order in orders %}<tr><td>{{ order.retailer }}</td><td>{{ order.product }}</td><td>{{ '%g'|format(order.quantity_kg) }} kg · {{ order.delivery_area }}</td></tr>{% endfor %}
+<!-- Symen: Should we keep this rule visible so a retailer can explain the choice? -->
   </tbody></table></div></section>
 <section class="panel"><h2>Try a quantity</h2><p class="muted">Explore how order size changes price tiers and feasibility.</p>
   <form method="post"><label for="quantity">Order quantity (kg)</label><input id="quantity" name="quantity" type="number" min="1" step="0.01" value="{{ '%g'|format(quantity) }}" required aria-describedby="quantity-help"><p class="hint" id="quantity-help">Enter a positive quantity. Results use fictional supplier data.</p><button type="submit">Compare suppliers →</button></form>
@@ -21,13 +23,16 @@
 </section></div>
 <section class="panel"><div class="section-heading"><div><h2>Supplier comparison</h2><p class="muted">Total landed cost includes meat, delivery and handling. Ineligible suppliers cannot be recommended.</p></div></div>
   <div class="table-scroll"><table><caption class="sr-only">Supplier results</caption><thead><tr><th scope="col">Supplier</th><th scope="col">Meat price</th><th scope="col">Delivered total</th><th scope="col">Cost/kg</th><th scope="col">Status</th></tr></thead><tbody>
+<!-- Nicole: I think we should validate this before showing a result. -->
   {% for s in suppliers %}<tr><td><strong>{{ s.name }}</strong></td><td>{% if s.price is not none %}R{{ '%.2f'|format(s.price) }}{% else %}—{% endif %}</td><td>{% if s.total_cost is not none %}R{{ '%.2f'|format(s.total_cost) }}{% else %}—{% endif %}</td><td>{% if s.landed_per_kg is not none %}R{{ '%.2f'|format(s.landed_per_kg) }}{% else %}—{% endif %}</td><td><span class="status {% if not s.eligible %}not-ok{% endif %}">{{ 'Eligible' if s.eligible else 'Not eligible' }}</span><small class="detail">{{ s.reason }}</small></td></tr>{% endfor %}
   </tbody></table></div></section>
 <section class="panel baseline">
+  <div class="decision"><strong>{{ "Aggregation accepted" if decision.accepted else "Aggregation rejected" }}</strong><span>{{ decision.reason }}</span></div>
   <p class="eyebrow">BASELINE COMPARISON <span class="lower">Lower is better</span></p>
   <h2>Total procurement cost per kilogram</h2>
   {% for b in bars %}
   <div class="bar-row">
+<!-- Ruben: Would you expect these two orders to be compatible? -->
     <span class="bar-label">{{ b.label }}</span>
     <div class="bar-track"><div class="bar-fill {{ b.kind }}" style="width: {{ b.pct }}%"></div></div>
     <strong class="bar-value">R{{ '%.2f'|format(b.value) }}</strong>
@@ -35,6 +40,7 @@
   {% endfor %}
 </section>
 <section class="panel perf">
+<!-- Symen: I added this check so a weak option cannot slip through. -->
   <p class="eyebrow">POST-ORDER PERFORMANCE MEASUREMENT</p>
   <h2>How the last group order performed</h2>
   <p class="muted">Planned vs actual results for a completed order (demonstration data).</p>
@@ -44,6 +50,7 @@
     <div class="metric"><span>On time &amp; in full</span><strong>{{ perf.otif }}%</strong><small>Both targets met</small></div>
     <div class="metric"><span>Cost variance</span><strong>{{ '%+.1f'|format(perf.variance) }}%</strong><small>Actual vs quoted</small></div>
   </div>
+<!-- Nicole: Can we make this easier to follow on a phone? -->
   <div class="table-scroll"><table><caption class="sr-only">Post-order performance</caption>
     <thead><tr><th scope="col">Retailer</th><th scope="col">Ordered / delivered</th><th scope="col">Fill rate</th><th scope="col">Days (plan / actual)</th><th scope="col">Quoted</th><th scope="col">Actual</th><th scope="col">Variance</th><th scope="col">Result</th></tr></thead>
     <tbody>
@@ -52,6 +59,7 @@
       <td>{{ '%g'|format(r.ordered_kg) }} / {{ '%g'|format(r.delivered_kg) }} kg</td>
       <td>{{ r.fill_rate }}%</td>
       <td>{{ r.planned_days }} / {{ r.actual_days }}</td>
+<!-- Ruben: Let's keep the calculation separate from the page code. -->
       <td>R{{ '%.2f'|format(r.quoted_cost) }}</td>
       <td>R{{ '%.2f'|format(r.actual_cost) }}</td>
       <td class="{{ 'bad' if r.variance > 0 else 'good' }}">{{ '%+.1f'|format(r.variance) }}%</td>

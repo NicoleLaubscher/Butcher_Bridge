@@ -1,65 +1,45 @@
-# ButcherBridge - BFB 321 Semester Project
+# ButcherBridge · BFB 321 Group 06
 
-This smaller, original student-readable demonstration was reconstructed from the larger
-ButcherBridge Flask/MySQL reference, focusing on the **Semester Project** row of the
-*BFB 321 Supply Chain Web Application Project - End-to-End Development Guide*.
+ButcherBridge is a course demonstration of how local butcheries could compare compatible group demand with supplier capacity, service and full delivered cost. It covers the Semester Project Guide's Steps 1 and 2: a responsive web interface and a standalone, documented supply-chain calculation model with hand-checked unit tests.
 
-## Included for this stage
-- Responsive web pages built with HTML and one CSS stylesheet
-- Accessible navigation, form labels, validation hints and readable tables
-- `calculations.py`: **standalone supply-chain model** (imports no Flask/database code)
-- `test_calculations.py`: unit tests against known hand calculations
-- `app.py`: optional lightweight Flask preview, using fictional sample data
+## Team
 
-## Folder structure
-```
-ButcherBridge_Semester_Project/
-|-- app.py                   # simple website preview
-|-- calculations.py          # supply chain formulas (standalone)
-|-- sample_data.py           # fictional classroom data
-|-- test_calculations.py     # tests independent of Flask
-|-- requirements.txt
-|-- templates/
-|   |-- base.html
-|   |-- index.html
-|   `-- method.html
-`-- static/
-    `-- style.css
-```
+- Symen le Roux — u23608197
+- Nicole Laubscher — u23530317
+- Ruben Boonstra — u24588742
 
-## Running on Windows
-1. Open a terminal in this folder.
-2. Run `py -m pip install -r requirements.txt`.
-3. Start the example website with `py app.py`.
-4. Visit `http://127.0.0.1:5000`.
-5. Test independently with `py -m unittest -v`.
+## Run the demonstration
 
-macOS / Linux: replace `py` with `python3`.
+1. Install Python 3.10 or newer.
+2. From this folder, create and activate a virtual environment if desired.
+3. Install dependencies with `python -m pip install -r requirements.txt`.
+4. Start the site with `python run_butcherbridge_demo.py` and open `http://127.0.0.1:5000`.
+5. Run standalone model checks with `python -m unittest -v`.
 
-## How to explain the supply-chain concept
-Three retailers order 100, 150 and 250 kg of the same beef product.
-Combined demand = **500 kg**. Supplier A's price for that quantity is **R82/kg**.
-Supplier A's total delivered cost is:
-`500 * 82 + 600 + (500 * 1) + 150 = R42,250`, or **R84.50/kg**.
-Supplier B costs `500 * 84 + 350 + (500 * 0.5) + 100 = R42,700`.
-Supplier C cannot supply the required 500 kg (capacity is 350 kg).
-Thus Supplier A is the lowest-cost eligible group supplier.
+## Descriptive files
 
-The classroom baseline is each retailer paying R95/kg plus R600 delivery.
-Baseline = `500 * 95 + 3 * 600 = R49,300`.
-Saving = `(49,300 - 42,250) / 49,300 * 100 = 14.30%` (rounded).
-**These are illustrative assumptions, not measured real-world savings.**
+- `butcherbridge_demo_app.py` contains the Flask routes and display preparation.
+- `supply_chain_model.py` contains the standard-library-only calculation logic.
+<!-- Ruben: If we update the fictional values, should we check every number against the model's tests? -->
+- `demo_supply_chain_data.py` contains fictional example retailers, suppliers and deliveries.
+- `test_supply_chain_model.py` checks formulas and decisions against hand-calculated cases.
+- `templates/` contains the shared page layout, dashboard, retailer/supplier form previews and methodology page.
+- `static/butcherbridge_design.css` styles the responsive white-and-black interface; `static/nguni-background.jpg` is the Nguni background image.
 
-## Model assumptions and limitations
-- Only the same meat specification should be aggregated.
-- Supplier rates represent quoted tier prices, in ZAR per kilogram.
-- Supplier capacity, lead time and expected fill rate must pass feasibility checks.
-- There is no database, login, REST API, actual order booking or saved state.
-- No delivery area or on-time probability checks yet; those can be added in the final project.
-- Tax, refrigeration losses, spoilage, vehicle routing and inventory carrying costs are excluded.
-- The quantity form is a calculation demo and **does not** save orders.
+## Step 1 interface coverage
 
-## Scope boundary
-The lecturer's **Final Project (Exam)** section includes API design, data model,
-integration, deployment and impact/sustainability. Those features are intentionally
-excluded from this Semester Project starting point.
+The site has responsive dashboard, retailer-demand, supplier-offer and methodology pages; reusable shared navigation and layout; labelled form fields, required/range constraints, validation messages, keyboard focus indicators, skip navigation, table captions and mobile-friendly tables. The two input flows validate previews only. They do not save orders, publish offers, or maintain a database.
+
+## Step 2 model coverage
+
+The model checks matching product, specification, needed date and delivery area before aggregation; volume price tiers; total landed cost; delivered cost per kg; baseline savings; capacity, lead-time, fill-rate, service-area and price-tier feasibility; proportional fixed-cost allocation; and post-order fill, on-time, OTIF and cost variance. It rejects group buying when no supplier qualifies or when the group option is not cheaper than the individual baseline.
+
+## Illustrative scenario and limitations
+
+Three compatible sample orders (100, 150 and 250 kg) total 500 kg. Supplier A's sample 500 kg tier is R82/kg. Landed cost is `500 × 82 + 600 + 500 × 1 + 150 = R42,250`, or R84.50/kg. The individual baseline is R95/kg plus R600 delivery per retailer, giving `(500 × 95 + 3 × 600) / 500 = R98.60/kg`. These fictional numbers demonstrate the method; they are not measured savings or primary research. The project does not book orders, save user data, include authentication/API/database/deployment, or establish real price, service, quality or logistics data. The lecturer's feedback identifies primary-data validation and multiple realistic scenarios as later final-exam work, beyond this Step 1 and 2 submission.
+
+## Scope
+
+This submission targets only Steps 1 and 2. It does not claim to complete later integration, deployment or impact evaluation requirements.
+
+
