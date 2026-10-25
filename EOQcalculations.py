@@ -1,14 +1,14 @@
-"""BUTCHERBRIDGE - SUPPLY CHAIN CALCULATIONS
+"""BUTCHERBRIDGE - Standalone EOQ and supplier comparison calculations.
 
 This file is the independent supply-chain model for the semester project.
-It deliberately does NOT import Flask, HTML, or database libraries.
+This file does not import Flask, HTML, or database libraries.
 
-Business idea: Several butcheries can combine orders for the SAME product.
+ButcherBridge supplychain solution: Several butcheries can combine orders for the same product.
 A larger combined order may qualify for a lower supplier price per kilogram.
 We compare the full delivered cost, not only the advertised meat price.
 
-Monetary amounts are South African rand (R); quantities are kilograms (kg).
-Sample numbers are for classroom demonstration, not real supplier quotes.
+Monetary amounts are South African rand(R); quantities are kilograms(kg).
+Sample numbers are fictional, not real supplier quotes.
 """
 
 def check_positive(value, name):

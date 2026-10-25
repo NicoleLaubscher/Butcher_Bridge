@@ -1,0 +1,11 @@
+{% extends 'shared_page_layout.html' %}{% block title %}Retailer demand | ButcherBridge{% endblock %}{% block content %}
+<!-- Symen: Does this label tell the next person what the number means? -->
+<!-- Nicole: This example is fictional, so let's say that clearly. -->
+<section class="hero"><p class="eyebrow">STEP 1 · RETAILER FLOW</p><h1>Share a demand preview.</h1><p>Check the information a retailer would provide. This classroom form validates a preview and does not save or submit a real order.</p></section>
+<!-- Ruben: Should we show the reason when this option fails? -->
+<section class="panel form-panel"><h2>Retailer demand details</h2><p class="muted">Compatible orders need the same product, specification, date and delivery area.</p>
+<!-- Symen: Should we keep this rule visible so a retailer can explain the choice? -->
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}{% if submitted %}<p class="notice" role="status">Preview validated. It has not been saved.</p>{% endif %}
+<!-- Nicole: I think we should validate this before showing a result. -->
+<form method="post"><div class="form-grid">
+{% for key,label in [('retailer','Retailer name'),('product','Product'),('specification','Product specification'),('needed_date','Required delivery date'),('delivery_area','Delivery area'),('quantity_kg','Quantity (kg)')] %}<div><label for="{{ key }}">{{ label }}</label><input id="{{ key }}" name="{{ key }}" {% if key=='needed_date' %}type="date"{% elif key=='quantity_kg' %}type="number" min="0.01" step="0.01"{% else %}type="text"{% endif %} value="{{ values.get(key,'') }}" required></div>{% endfor %}</div><button type="submit">Validate demand preview</button></form></section>{% endblock %}

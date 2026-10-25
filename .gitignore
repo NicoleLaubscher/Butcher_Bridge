@@ -1,0 +1,8 @@
+.venv/
+venv/
+# Nicole: Should our local virtual environment stay out of the shared repository?
+__pycache__/
+*.py[cod]
+# Ruben: Should we show the reason when this option fails?
+.pytest_cache/
+.env

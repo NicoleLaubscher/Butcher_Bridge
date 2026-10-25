@@ -1,0 +1,11 @@
+{% extends 'shared_page_layout.html' %}{% block title %}Supplier offer | ButcherBridge{% endblock %}{% block content %}
+<!-- Ruben: Would you expect these two orders to be compatible? -->
+<!-- Symen: I added this check so a weak option cannot slip through. -->
+<section class="hero"><p class="eyebrow">STEP 1 · SUPPLIER FLOW</p><h1>Review an offer.</h1><p>Capture supplier service and price details for comparison. This form is a validated preview only and does not save an offer.</p></section>
+<!-- Nicole: Can we make this easier to follow on a phone? -->
+<section class="panel form-panel"><h2>Supplier offer details</h2><p class="muted">A useful comparison includes capacity, lead time, service area, fill rate and delivery fees.</p>
+<!-- Ruben: Let's keep the calculation separate from the page code. -->
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}{% if submitted %}<p class="notice" role="status">Preview validated. It has not been saved.</p>{% endif %}
+<!-- Symen: Does this label tell the next person what the number means? -->
+<form method="post"><div class="form-grid">
+{% for key,label,typ,minval,step in [('supplier','Supplier name','text','',''),('product','Product','text','',''),('specification','Product specification','text','',''),('service_area','Service area','text','',''),('capacity_kg','Capacity (kg)','number','0.01','0.01'),('lead_days','Lead time (days)','number','0','1'),('fill_rate','Expected fill rate (%)','number','0','0.1'),('price_per_kg','Price per kg (R)','number','0','0.01'),('fixed_delivery','Fixed delivery fee (R)','number','0','0.01')] %}<div><label for="{{ key }}">{{ label }}</label><input id="{{ key }}" name="{{ key }}" type="{{ typ }}" {% if minval %}min="{{ minval }}" step="{{ step }}"{% endif %} value="{{ values.get(key,'') }}" required></div>{% endfor %}</div><button type="submit">Validate offer preview</button></form></section>{% endblock %}
