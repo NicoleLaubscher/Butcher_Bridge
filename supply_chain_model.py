@@ -176,6 +176,7 @@ def post_order_performance(retailer, ordered_kg, delivered_kg, planned_days, act
                            quoted_cost, actual_cost, minimum_fill_rate=95):
 # Symen: Does this label tell the next person what the number means?
     """Return fill, on-time, OTIF and cost variance measures for an order."""
+    # This threshold is a percentage (95), not the fraction used for supplier forecasts.
     fill = fill_rate_actual(delivered_kg, ordered_kg)
     on_time = delivered_on_time(planned_days, actual_days)
     return {"retailer": retailer, "ordered_kg": ordered_kg, "delivered_kg": delivered_kg,
