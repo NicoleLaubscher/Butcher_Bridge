@@ -75,6 +75,7 @@ def landed_cost_per_kg(total_cost, quantity_kg):
 
 def savings_percentage(baseline_cost, proposed_cost):
     """Formula 5: (baseline - proposed) / baseline * 100; negative means worse."""
+    # A positive baseline keeps the percentage denominator meaningful.
     old = check_positive(baseline_cost, "baseline cost")
     return round((old - check_non_negative(proposed_cost, "proposed cost")) / old * 100, 2)
 
