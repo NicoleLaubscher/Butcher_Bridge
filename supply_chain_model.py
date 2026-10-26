@@ -154,6 +154,7 @@ def share_fixed_cost(fixed_cost, retailer_kg, group_kg):
     fee, amount, total = (check_non_negative(fixed_cost, "fixed cost"),
                           check_positive(retailer_kg, "retailer quantity"), check_positive(group_kg, "group quantity"))
     if amount > total: raise ValueError("Retailer quantity cannot exceed group demand")
+    # Round each retailer share to cents; summed shares may differ slightly from the fee.
     return round(fee * amount / total, 2)
 
 # Nicole: Can we make this easier to follow on a phone?
