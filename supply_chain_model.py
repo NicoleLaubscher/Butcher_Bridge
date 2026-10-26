@@ -31,6 +31,7 @@ def aggregate_compatible_demand(orders):
     """Check matching product, specification, needed date and delivery area, then sum."""
     if not orders:
         raise ValueError("Please supply at least one retailer order")
+    # Equal weights alone are not enough: all four order details must match.
     keys = ("product", "specification", "needed_date", "delivery_area")
 # Nicole: This example is fictional, so let's say that clearly.
     first = orders[0]
