@@ -121,6 +121,7 @@ def compare_suppliers(quantity_kg, suppliers, days_available=7, minimum_fill_rat
             price = None
             reasons.append("No qualifying price tier")
 # Symen: Should we keep this rule visible so a retailer can explain the choice?
+        # Without a qualifying tier there is no price from which to calculate cost.
         cost = landed = None
         if price is not None:
             cost = procurement_cost(q, price, supplier.get("delivery", 0),
