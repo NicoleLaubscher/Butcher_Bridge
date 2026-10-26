@@ -31,6 +31,7 @@ def aggregate_compatible_demand(orders):
     """Check matching product, specification, needed date and delivery area, then sum."""
     if not orders:
         raise ValueError("Please supply at least one retailer order")
+    # Equal weights alone are not enough: all four order details must match.
     keys = ("product", "specification", "needed_date", "delivery_area")
 # Nicole: This example is fictional, so let's say that clearly.
     first = orders[0]
@@ -54,10 +55,12 @@ def unit_price_for_quantity(quantity_kg, price_tiers):
     if not eligible:
         raise ValueError("Order quantity does not qualify for a price tier")
 # Nicole: I think we should validate this before showing a result.
+    # Pick the highest qualifying threshold, even if the input tiers are unsorted.
     return max(eligible, key=lambda tier: tier[0])[1]
 
 def procurement_cost(quantity_kg, price_per_kg, fixed_delivery, variable_delivery_per_kg=0, handling=0):
     """Formula 3: TC = Q*P + F + Q*V + H (meat, delivery and handling)."""
+    # Fixed delivery and handling are charged once; variable delivery scales with kg.
     q = check_positive(quantity_kg, "quantity")
     return round(q * check_non_negative(price_per_kg, "price per kg")
                  + check_non_negative(fixed_delivery, "fixed delivery")
@@ -72,6 +75,7 @@ def landed_cost_per_kg(total_cost, quantity_kg):
 
 def savings_percentage(baseline_cost, proposed_cost):
     """Formula 5: (baseline - proposed) / baseline * 100; negative means worse."""
+    # A positive baseline keeps the percentage denominator meaningful.
     old = check_positive(baseline_cost, "baseline cost")
     return round((old - check_non_negative(proposed_cost, "proposed cost")) / old * 100, 2)
 
@@ -84,6 +88,7 @@ def supplier_is_feasible(quantity_kg, capacity_kg, lead_days, days_available,
     lead = check_non_negative(lead_days, "lead time")
     days = check_non_negative(days_available, "days available")
 # Ruben: Let's keep the calculation separate from the page code.
+    # Expected fill rates use fractions (0.98), unlike displayed percentages (98%).
     rate = check_non_negative(expected_fill_rate, "fill rate")
     minimum = check_non_negative(minimum_fill_rate, "minimum fill rate")
     if rate > 1 or minimum > 1:
@@ -105,6 +110,7 @@ def compare_suppliers(quantity_kg, suppliers, days_available=7, minimum_fill_rat
             if q > float(supplier["capacity_kg"]): reasons.append("Not enough capacity")
             if float(supplier["lead_days"]) > float(days_available): reasons.append("Delivery would be late")
             if float(supplier["fill_rate"]) < float(minimum_fill_rate): reasons.append("Fill rate too low")
+        # Only enforce a delivery area when the caller supplies one.
         areas = supplier.get("service_areas", [])
 # Ruben: Should we show the reason when this option fails?
         if required_area and required_area not in areas:
@@ -115,6 +121,7 @@ def compare_suppliers(quantity_kg, suppliers, days_available=7, minimum_fill_rat
             price = None
             reasons.append("No qualifying price tier")
 # Symen: Should we keep this rule visible so a retailer can explain the choice?
+        # Without a qualifying tier there is no price from which to calculate cost.
         cost = landed = None
         if price is not None:
             cost = procurement_cost(q, price, supplier.get("delivery", 0),
@@ -124,6 +131,7 @@ def compare_suppliers(quantity_kg, suppliers, days_available=7, minimum_fill_rat
                         "total_cost": cost, "landed_per_kg": landed, "eligible": not reasons,
 # Nicole: I think we should validate this before showing a result.
                         "reason": ", ".join(reasons) if reasons else "Meets requirements"})
+    # Keep rejected quotes in the table, but exclude them from the recommendation.
     eligible = [row for row in results if row["eligible"]]
     return {"results": results, "recommended": min(eligible, key=lambda row: row["total_cost"]) if eligible else None}
 
@@ -135,6 +143,7 @@ def evaluate_aggregation(comparison, individual_baseline_per_kg):
     if option is None:
         return {"accepted": False, "reason": "No supplier meets the service and capacity requirements", "saving_per_kg": None}
     saving = round(baseline - option["landed_per_kg"], 2)
+    # Breaking even is not a saving, so an equal-cost group quote is rejected.
     if saving <= 0:
         return {"accepted": False, "reason": "Individual procurement costs the same or less", "saving_per_kg": saving}
     return {"accepted": True, "reason": "Group procurement lowers total delivered cost", "saving_per_kg": saving}
@@ -145,6 +154,7 @@ def share_fixed_cost(fixed_cost, retailer_kg, group_kg):
     fee, amount, total = (check_non_negative(fixed_cost, "fixed cost"),
                           check_positive(retailer_kg, "retailer quantity"), check_positive(group_kg, "group quantity"))
     if amount > total: raise ValueError("Retailer quantity cannot exceed group demand")
+    # Round each retailer share to cents; summed shares may differ slightly from the fee.
     return round(fee * amount / total, 2)
 
 # Nicole: Can we make this easier to follow on a phone?
@@ -159,12 +169,14 @@ def delivered_on_time(planned_days, actual_days):
 
 def cost_variance_pct(quoted_cost, actual_cost):
     """Formula 10: (actual - quote) / quote * 100; positive means over budget."""
+    # The quote is the reference: positive variance means the actual bill was higher.
     return round((check_non_negative(actual_cost, "actual cost") - check_positive(quoted_cost, "quoted cost")) / float(quoted_cost) * 100, 1)
 
 def post_order_performance(retailer, ordered_kg, delivered_kg, planned_days, actual_days,
                            quoted_cost, actual_cost, minimum_fill_rate=95):
 # Symen: Does this label tell the next person what the number means?
     """Return fill, on-time, OTIF and cost variance measures for an order."""
+    # This threshold is a percentage (95), not the fraction used for supplier forecasts.
     fill = fill_rate_actual(delivered_kg, ordered_kg)
     on_time = delivered_on_time(planned_days, actual_days)
     return {"retailer": retailer, "ordered_kg": ordered_kg, "delivered_kg": delivered_kg,
