@@ -131,6 +131,7 @@ def compare_suppliers(quantity_kg, suppliers, days_available=7, minimum_fill_rat
                         "total_cost": cost, "landed_per_kg": landed, "eligible": not reasons,
 # Nicole: I think we should validate this before showing a result.
                         "reason": ", ".join(reasons) if reasons else "Meets requirements"})
+    # Keep rejected quotes in the table, but exclude them from the recommendation.
     eligible = [row for row in results if row["eligible"]]
     return {"results": results, "recommended": min(eligible, key=lambda row: row["total_cost"]) if eligible else None}
 
