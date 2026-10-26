@@ -110,6 +110,7 @@ def compare_suppliers(quantity_kg, suppliers, days_available=7, minimum_fill_rat
             if q > float(supplier["capacity_kg"]): reasons.append("Not enough capacity")
             if float(supplier["lead_days"]) > float(days_available): reasons.append("Delivery would be late")
             if float(supplier["fill_rate"]) < float(minimum_fill_rate): reasons.append("Fill rate too low")
+        # Only enforce a delivery area when the caller supplies one.
         areas = supplier.get("service_areas", [])
 # Ruben: Should we show the reason when this option fails?
         if required_area and required_area not in areas:
