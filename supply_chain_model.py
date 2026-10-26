@@ -55,6 +55,7 @@ def unit_price_for_quantity(quantity_kg, price_tiers):
     if not eligible:
         raise ValueError("Order quantity does not qualify for a price tier")
 # Nicole: I think we should validate this before showing a result.
+    # Pick the highest qualifying threshold, even if the input tiers are unsorted.
     return max(eligible, key=lambda tier: tier[0])[1]
 
 def procurement_cost(quantity_kg, price_per_kg, fixed_delivery, variable_delivery_per_kg=0, handling=0):
