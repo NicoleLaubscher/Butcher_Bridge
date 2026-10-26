@@ -143,6 +143,7 @@ def evaluate_aggregation(comparison, individual_baseline_per_kg):
     if option is None:
         return {"accepted": False, "reason": "No supplier meets the service and capacity requirements", "saving_per_kg": None}
     saving = round(baseline - option["landed_per_kg"], 2)
+    # Breaking even is not a saving, so an equal-cost group quote is rejected.
     if saving <= 0:
         return {"accepted": False, "reason": "Individual procurement costs the same or less", "saving_per_kg": saving}
     return {"accepted": True, "reason": "Group procurement lowers total delivered cost", "saving_per_kg": saving}
