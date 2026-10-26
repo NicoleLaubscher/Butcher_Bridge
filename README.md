@@ -43,3 +43,61 @@ Three compatible sample orders (100, 150 and 250 kg) total 500 kg. Supplier A's 
 This submission targets only Steps 1 and 2. It does not claim to complete later integration, deployment or impact evaluation requirements.
 
 
+
+## Local development setup
+
+Use Python 3.10 or newer and open a terminal in the project directory containing
+`run_butcherbridge_demo.py` and `requirements.txt`. The repository includes a
+Windows `.venv` from another computer; create your own environment in `venv/`
+(an ignored directory) rather than reusing it.
+
+On Windows PowerShell:
+
+```powershell
+py -m venv venv
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+.\venv\Scripts\python.exe run_butcherbridge_demo.py
+```
+
+On macOS or Linux:
+
+```bash
+python3 -m venv venv
+./venv/bin/python -m pip install -r requirements.txt
+./venv/bin/python run_butcherbridge_demo.py
+```
+
+Using the environment's Python directly avoids activation and PowerShell
+execution-policy issues. Open the local address printed by Flask in your browser.
+The demonstration uses fictional data; form previews do not save orders or offers.
+
+Run the existing calculation tests before submitting changes:
+
+```powershell
+# Windows
+.\venv\Scripts\python.exe -m unittest -v
+```
+
+```bash
+# macOS/Linux
+./venv/bin/python -m unittest -v
+```
+
+### Troubleshooting
+
+- **Python is not recognised:** install Python 3.10 or newer and reopen the terminal.
+- **Flask module not found:** install `requirements.txt` using the same virtual
+  environment's Python that starts the application.
+- **Port 5000 is already in use:** stop your previous development server, or run
+  the Flask CLI with another port, for example
+  `./venv/bin/python -m flask --app butcherbridge_demo_app run --port 5001`
+  (use `.\venv\Scripts\python.exe` on Windows).
+- **Browser cannot connect:** keep the server terminal running and use the address
+  and port printed there.
+
+### Methodology page status
+
+`templates/calculation_methodology.html` exists, but the current application does
+not register a route for it or include it in navigation. The template alone does
+not make a page available. The working routes are `/`, `/retailer-demand`, and
+`/supplier-offer`; adding a methodology route requires a separate application change.
