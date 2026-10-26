@@ -60,6 +60,7 @@ def unit_price_for_quantity(quantity_kg, price_tiers):
 
 def procurement_cost(quantity_kg, price_per_kg, fixed_delivery, variable_delivery_per_kg=0, handling=0):
     """Formula 3: TC = Q*P + F + Q*V + H (meat, delivery and handling)."""
+    # Fixed delivery and handling are charged once; variable delivery scales with kg.
     q = check_positive(quantity_kg, "quantity")
     return round(q * check_non_negative(price_per_kg, "price per kg")
                  + check_non_negative(fixed_delivery, "fixed delivery")
