@@ -88,6 +88,7 @@ def supplier_is_feasible(quantity_kg, capacity_kg, lead_days, days_available,
     lead = check_non_negative(lead_days, "lead time")
     days = check_non_negative(days_available, "days available")
 # Ruben: Let's keep the calculation separate from the page code.
+    # Expected fill rates use fractions (0.98), unlike displayed percentages (98%).
     rate = check_non_negative(expected_fill_rate, "fill rate")
     minimum = check_non_negative(minimum_fill_rate, "minimum fill rate")
     if rate > 1 or minimum > 1:
