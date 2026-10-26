@@ -169,6 +169,7 @@ def delivered_on_time(planned_days, actual_days):
 
 def cost_variance_pct(quoted_cost, actual_cost):
     """Formula 10: (actual - quote) / quote * 100; positive means over budget."""
+    # The quote is the reference: positive variance means the actual bill was higher.
     return round((check_non_negative(actual_cost, "actual cost") - check_positive(quoted_cost, "quoted cost")) / float(quoted_cost) * 100, 1)
 
 def post_order_performance(retailer, ordered_kg, delivered_kg, planned_days, actual_days,
