@@ -1,0 +1,102 @@
+erDiagram
+    retailers ||..o{ demand_orders : fk_demand_retailer
+    products ||..o{ demand_orders : fk_demand_product
+    order_windows ||..o{ demand_orders : fk_demand_window
+    suppliers ||..o{ supplier_offers : fk_offer_supplier
+    products ||..o{ supplier_offers : fk_offer_product
+    supplier_offers ||..o{ price_tiers : fk_tier_offer
+    supplier_offers ||..o{ allocations : fk_alloc_offer
+    order_windows ||..o{ allocations : fk_alloc_window
+    demand_orders ||..o| fulfilments : fk_fulfilment_order
+
+    retailers {
+        BIGINT id PK "auto increment"
+        VARCHAR name UK "120"
+        VARCHAR area "100"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+    products {
+        BIGINT id PK "auto increment"
+        VARCHAR name "100; uq_product with specification"
+        VARCHAR specification "180; uq_product with name"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+    order_windows {
+        BIGINT id PK "auto increment"
+        VARCHAR label UK "100"
+        DATETIME closes_at
+        ENUM status "open, closed"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+    demand_orders {
+        BIGINT id PK "auto increment"
+        BIGINT retailer_id FK
+        BIGINT product_id FK "ix_demand_group (2)"
+        BIGINT window_id FK "ix_demand_group (1)"
+        DATE needed_date "ix_demand_group (3)"
+        VARCHAR delivery_area "100; ix_demand_group (4)"
+        DECIMAL quantity_kg "12,2"
+        DECIMAL baseline_price_per_kg "12,2"
+        DECIMAL baseline_logistics_cost "12,2"
+        INT baseline_trips
+        DECIMAL baseline_distance_km "12,2"
+        ENUM status "draft, committed, withdrawn, fulfilled; ix_demand_group (5)"
+        ENUM evidence_type "primary, quoted, estimated, simulated"
+        VARCHAR evidence_note "500; nullable"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+    suppliers {
+        BIGINT id PK "auto increment"
+        VARCHAR name UK "120"
+        VARCHAR service_area "100"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+    supplier_offers {
+        BIGINT id PK "auto increment"
+        BIGINT supplier_id FK
+        BIGINT product_id FK "ix_offer_product (1)"
+        DECIMAL capacity_kg "12,2"
+        INT lead_days
+        DECIMAL fill_rate "5,4"
+        DECIMAL fixed_delivery "12,2"
+        DECIMAL variable_delivery_per_kg "12,2"
+        DECIMAL handling_cost "12,2"
+        INT coordinated_trips
+        DECIMAL coordinated_distance_km "12,2"
+        BOOLEAN active "ix_offer_product (2)"
+        ENUM evidence_type "primary, quoted, estimated, simulated"
+        VARCHAR evidence_note "500; nullable"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+    price_tiers {
+        BIGINT id PK "auto increment"
+        BIGINT offer_id FK "uq_tier (1); on delete cascade"
+        DECIMAL min_quantity_kg "12,2; uq_tier (2)"
+        DECIMAL price_per_kg "12,2"
+    }
+    allocations {
+        BIGINT id PK "auto increment"
+        BIGINT offer_id FK "uq_offer_window (1)"
+        BIGINT window_id FK "uq_offer_window (2)"
+        DECIMAL quantity_kg "12,2"
+        ENUM status "reserved, released"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+    fulfilments {
+        BIGINT id PK "auto increment"
+        BIGINT demand_order_id FK, UK
+        DECIMAL delivered_kg "12,2"
+        INT planned_days
+        INT actual_days
+        DECIMAL quoted_cost "12,2"
+        DECIMAL actual_cost "12,2"
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }

@@ -1,0 +1,10 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.log
+certs/
+.pytest_cache/
+*.sql.gz
+backups/

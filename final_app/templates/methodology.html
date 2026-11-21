@@ -1,0 +1,33 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="hero">
+  <h1>Procurement methodology</h1>
+  <p>How the dashboard prices purchases, compares plans and reports fulfilment.</p>
+</div>
+<section class="panel">
+  <h2>Demand and planning</h2>
+  <ul>
+    <li>Planning includes only committed orders. Compatible orders share a product/specification ID, procurement window, required date and delivery area.</li>
+    <li>Fixed batches can use one supplier offer or keep their individual baselines. The optimiser can also compare subsets of compatible retailers and single-retailer supplier purchases. Each retailer's orders within a compatibility bucket stay together.</li>
+    <li>Offer capacity is shared across dates and windows. Reserved quantities reduce available capacity. Both reserved and released allocations occupy their offer/window key for a new reservation.</li>
+    <li>Supplier eligibility requires service area coverage, a qualifying price tier, sufficient capacity, lead time within the required date and expected fill of at least 95%.</li>
+    <li>The cheapest fixed choices are exact when they fit together. Conflicts above the 100,000-combination limit keep the individual baselines. The optional grouping search has separate limits and independently evaluates fixed batches if it reaches one. An exact result is optimal within the model's choices and constraints.</li>
+  </ul>
+</section>
+<section class="panel">
+  <h2>Prices and estimated savings</h2>
+  <ul>
+    <li>Delivered cost is kilograms times the highest qualifying all-units tier price, plus fixed delivery, per-kg delivery times kilograms and handling. Each purchase is priced separately and incurs its own fixed delivery and handling charges, even when their quantities are combined under one proposed reservation key. Confirm separate-purchase prices with the supplier before booking.</li>
+    <li>Each retailer's baseline sums kilograms times the retailer's baseline price per kg plus its recorded baseline logistics costs. A supplier quote must beat the combined baseline and be recoverable within the retailers' whole-cent caps.</li>
+    <li>Proposed charges are proportional to the caps and sum to the quote in cents. After flooring each share, the largest fractional shares get the remaining cents, with lower retailer IDs breaking ties. Charges stay within each retailer's own baseline. A lower total cost can still leave a retailer saving less than under fixed batches.</li>
+    <li>Both plans use the same database snapshot and evaluation date. Each committed order contributes once per plan. Retained orders contribute their full baseline. Selected purchases contribute the delivered quote.</li>
+    <li>Each plan's estimated savings are its cost subtracted from the individual baseline, shown also as a percentage of that baseline. Incremental savings subtract the optimised cost from the fixed cost and use the fixed cost as the denominator. A zero denominator displays as a dash. Fallback differences compare the plans returned within the search limits.</li>
+  </ul>
+</section>
+<section class="panel">
+  <h2>Logistics evidence and recorded outcomes</h2>
+  <p>Recorded baseline trips and distance are summed from orders. Coordinated trips and distance come from the supplier offer. These are descriptive fields. Cost uses the supplied logistics charges. Offer capacity is procurement capacity. Routing, vehicle scheduling and payload, cold-chain compliance, fuel and emissions are outside the model.</p>
+  <p>Actual fill, on-time delivery and strict OTIF use recorded fulfilments. Strict OTIF requires the full ordered quantity to arrive within the recorded planned time. The cost comparison estimates potential savings from quotes and baselines. Confirmations are recorded separately from proposals.</p>
+  <p>Withdrawals are allowed while the window remains open. Later changes and existing capacity holds require coordinator review.</p>
+</section>
+{% endblock %}

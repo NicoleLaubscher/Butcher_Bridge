@@ -1,0 +1,140 @@
+{% extends 'layout.html' %}
+{% macro plan_cost_card(title, plan) %}
+<article class="comparison-card">
+  <h3>{{title}}</h3>
+  <p class="comparison-cost">{{plan.total_cost|rand_amount}}</p>
+  <p>
+    <strong>{{plan.savings_vs_baseline|rand_amount}}</strong> estimated savings
+    <span class="comparison-reference">
+      {{plan.savings_pct_of_baseline ~ '%' if plan.savings_pct_of_baseline is not none else '—'}}
+      of the individual baseline
+    </span>
+  </p>
+  {% if plan.planning_status == 'exact' %}
+  <span class="tag success">Exact within the model</span>
+  {% else %}
+  <span class="tag reject">Fallback</span>
+  <p class="comparison-reason">{{plan.fallback_reason}}</p>
+  {% endif %}
+</article>
+{% endmacro %}
+{% block content %}
+<div class="hero">
+  <small>SUPPLY CHAIN ENGINEERING • LIVE MYSQL</small>
+  <h1>Procurement dashboard</h1>
+  <p>Compare procurement costs and review proposed purchases for compatible, committed demand.</p>
+</div>
+<section class="panel plan-comparison" aria-labelledby="comparison-title">
+  <div class="between comparison-heading">
+    <div>
+      <h2 id="comparison-title">Plan cost comparison</h2>
+      <p class="muted">Evaluated on {{comparison.evaluated_on}} · {{comparison.committed_order_count}} committed orders</p>
+    </div>
+    <nav class="grouping-selector" aria-label="Grouping mode">
+      <a href="{{url_for('home')}}"{% if mode == 'fixed' %} aria-current="page"{% endif %}>Fixed batches</a>
+      <a href="{{url_for('home', grouping='optimised')}}"{% if mode == 'optimised' %} aria-current="page"{% endif %}>Optimise retailer groups</a>
+    </nav>
+  </div>
+  <div class="comparison-grid">
+    <article class="comparison-card">
+      <h3>Individual procurement baseline</h3>
+      <p class="comparison-cost">{{comparison.baseline_total|rand_amount}}</p>
+    </article>
+    {{plan_cost_card('Fixed-batch plan cost', comparison.fixed)}}
+    {{plan_cost_card('Optimised grouping plan cost', comparison.optimised)}}
+  </div>
+  <div class="comparison-incremental">
+    <h3>Incremental estimated savings from grouping</h3>
+    <p>
+      <strong>{{comparison.incremental.savings_vs_fixed|rand_amount}}</strong>
+      <span class="comparison-reference">
+        {{comparison.incremental.savings_pct_of_fixed ~ '%' if comparison.incremental.savings_pct_of_fixed is not none else '—'}}
+        of the fixed-batch plan cost
+      </span>
+    </p>
+    {% if comparison.optimised.planning_status == 'fallback' %}
+    <p>The grouping search fell back to fixed batches. The difference shows the plans returned. Better groupings may still exist.</p>
+    {% elif comparison.fixed.planning_status == 'fallback' %}
+    <p>The difference is measured against the fixed-batch fallback.</p>
+    {% endif %}
+    {% if comparison.same_assignments %}
+    <p>Both plans assign the same purchases and individual baselines.</p>
+    {% elif comparison.same_cost %}
+    <p>The plans have equal estimated costs and different assignments.</p>
+    {% else %}
+    <p>The plans use different purchase assignments.</p>
+    {% endif %}
+  </div>
+  <p class="muted comparison-note">Both plans use the same orders, quotes and existing reservations. Savings are estimates, and proposed purchases remain unreserved.</p>
+</section>
+<div class="metrics"><article><span>Orders recorded</span><strong>{{metrics.orders}}</strong></article><article><span>Committed demand</span><strong>{{metrics.committed_kg|round(1)}} kg</strong></article><article><span>Actual fill rate</span><strong>{{metrics.fill_pct if metrics.fill_pct is not none else '—'}}{% if metrics.fill_pct is not none %}%{% endif %}</strong></article><article>
+<span>On-time / Strict OTIF</span>
+<strong>
+  {{ (metrics.on_time_pct|string) ~ '%' if metrics.on_time_pct is not none else '—' }}
+  /
+  {{ (metrics.otif_pct|string) ~ '%' if metrics.otif_pct is not none else '—' }}
+</strong></article></div>
+<h2>Procurement plan</h2>
+{% if mode == 'fixed' %}
+<p><strong>Fixed-batch plan.</strong></p>
+{% elif comparison.optimised.planning_status == 'fallback' %}
+<p><strong>Fixed-batch fallback.</strong></p>
+{% else %}
+<p><strong>Optimised retailer groups.</strong></p>
+{% endif %}
+{% if not batches %}<section class="panel">No committed demand yet. Use Retailer demand to add orders.</section>{% endif %}
+{% for b in batches %}
+<section class="panel procurement-batch">
+  <div class="between">
+    <h3>Window {{b.window_id}} · {{b.area}} · {{b.needed_date}}</h3>
+    {% if b.proposed_offer_id is none %}
+    <span class="tag">Individual baseline procurement</span>
+    {% elif b.retailer_count == 1 %}
+    <span class="tag success">Single-retailer supplier purchase</span>
+    {% else %}
+    <span class="tag success">Supplier group</span>
+    {% endif %}
+  </div>
+  <p>{{b.reason}}</p>
+  <p class="muted">
+    Product {{b.product_id}} · {{b.planned_cost|rand_amount}} planned cost
+    {% if b.proposed_offer_id is not none %} · {{b.best.supplier}}{% endif %}
+  </p>
+  <ul class="plan-members" aria-label="Retailers and original orders">
+    {% for member in b.retailers %}
+    <li><strong>{{member.name}}</strong> <span class="muted">· Order IDs {{member.order_ids|join(', ')}}</span></li>
+    {% endfor %}
+  </ul>
+<div class="metrics small">
+  <article><span>Compatible quantity</span><strong>{{b.quantity_kg}} kg</strong></article>
+  <article><span>Individual baseline</span><strong>R{{'%.2f'|format(b.baseline_cost_per_kg)}}/kg</strong></article>
+  <article><span>{{'Proposed supplier quote' if b.proposed_offer_id is not none else 'Diagnostic supplier quote'}}</span><strong>{% if b.best %}R{{'%.2f'|format(b.best.cost_per_kg)}}/kg{% else %}—{% endif %}</strong></article>
+  <article><span>Potential savings vs baseline</span><strong>{{b.recommended_savings_pct}}%</strong></article>
+</div>
+<p class="muted">Evidence: {{b.evidence_type}} · Baseline trips: {{b.baseline_trips}} · Distance: {{b.baseline_distance_km}} km. {% if b.best %}Coordinated trips: {{b.best.delivery_trips}} · Distance: {{b.best.distance_km}} km.{% endif %}</p>
+<div class="scroll" tabindex="0" role="region" aria-label="Supplier quotes and delivered cost"><table><caption>Supplier quotes and delivered cost</caption>
+  <thead><tr><th scope="col">Supplier</th><th scope="col">Reserved kg across windows</th><th scope="col">Unreserved kg</th><th scope="col">Price tier from kg</th><th scope="col">Total</th><th scope="col">Cost/kg</th><th scope="col">Batch eligibility</th><th scope="col">New reservation key</th></tr></thead>
+  <tbody>{% for v in b.offers %}
+    <tr>
+      <td>{{v.supplier}}{% if b.proposed_offer_id == v.offer_id %} <span class="tag success">Proposed purchase</span>{% endif %}</td>
+      <td>{{v.reserved_kg}}</td><td>{{v.available_kg}}</td><td>{{v.tier_min_kg or '—'}}</td>
+      <td>{{'R%.2f'|format(v.total_cost) if v.total_cost is not none else '—'}}</td><td>{{'R%.2f'|format(v.cost_per_kg) if v.cost_per_kg is not none else '—'}}</td>
+      <td>
+        {{'Eligible for this batch' if v.eligible else v.reasons|join('; ')}}
+        {% if v.cost_sharing_reason %}<br><span class="muted">{{v.cost_sharing_reason}}</span>{% endif %}
+      </td>
+      <td>{% if v.reservation_key_status == 'free' %}Free{% elif v.reservation_key_status %}Occupied ({{v.reservation_key_status}}){% else %}Unknown{% endif %}</td>
+    </tr>
+  {% endfor %}</tbody>
+</table></div>
+{% if b.proposed_retailer_costs %}
+<div class="scroll" tabindex="0" role="region" aria-label="Proposed retailer costs"><table><caption>Proposed retailer costs</caption>
+  <thead><tr><th scope="col">Retailer</th><th scope="col">Baseline cap</th><th scope="col">Proposed charge</th></tr></thead>
+  <tbody>{% for share in b.proposed_retailer_costs %}
+    <tr><th scope="row">{{share.retailer}}</th><td>R{{share.baseline_cap}}</td><td>R{{share.proposed_cost}}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% endif %}
+</section>
+{% endfor %}
+{% endblock %}
