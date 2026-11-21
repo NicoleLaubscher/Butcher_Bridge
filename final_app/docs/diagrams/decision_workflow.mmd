@@ -1,0 +1,31 @@
+flowchart TD
+    Demand["Record retailer demand and baseline evidence"]
+    Commit{"Order committed?"}
+    Excluded["Outside procurement planning"]
+    Group["Group compatible orders<br/>Window, product/specification, needed date, delivery area"]
+    Check["Check active supplier offers, area, lead time, expected fill,<br/>remaining capacity, reservation key and all-units tier"]
+    Select["Evaluate fixed batches or allowed retailer groups<br/>with shared capacity and fair recoverable cost"]
+    Limit{"Search completes?"}
+    Fall["Use bounded fallback<br/>Optimised mode retries fixed; fixed limit keeps baselines"]
+    Result{"Supplier purchase selected?"}
+    Base["Retain individual baselines"]
+    Share["Allocate delivered quote in cents within retailer caps"]
+    Proposal["Show proposed costs and total kg per offer/window"]
+    Confirm{"Coordinator confirms a hold?"}
+    NoHold["Proposal remains advisory"]
+    Hold["POST allocation locks the offer,<br/>rechecks capacity and inserts a unique key"]
+    Fulfil["Record delivery for a committed order<br/>POST fulfilment saves outcome and marks it fulfilled"]
+    Actual["Dashboard reports actual fill, on-time and strict OTIF"]
+    Demand --> Commit
+    Commit -- "No" --> Excluded
+    Commit -- "Yes" --> Group --> Check --> Select --> Limit
+    Limit -- "Yes" --> Result
+    Limit -- "No" --> Fall --> Result
+    Result -- "No" --> Base
+    Result -- "Yes" --> Share --> Proposal --> Confirm
+    Confirm -- "No" --> NoHold
+    Confirm -- "Yes" --> Hold
+    Base -. "Delivery recorded" .-> Fulfil
+    NoHold -. "Delivery recorded" .-> Fulfil
+    Hold -. "Delivery recorded" .-> Fulfil
+    Fulfil --> Actual
