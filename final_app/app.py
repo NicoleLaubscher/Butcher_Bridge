@@ -7,6 +7,7 @@ from functools import wraps
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from dotenv import load_dotenv
 from pymysql.err import IntegrityError
+from werkzeug.exceptions import HTTPException
 from db import query, read_snapshot, transaction
 from decision_engine import compare_plans, evaluate_optimised_plan, evaluate_plan
 from group_formation_planner import GroupPlanningLimits
@@ -149,7 +150,14 @@ def home():
 @app.get('/orders')
 @require_login
 def orders_page():
-    return render_template('orders.html',orders=all_orders(),**lookup_data())
+    lookups = lookup_data()
+    today = date.today()
+    editable_window_ids = {
+        row['id'] for row in lookups['windows']
+        if row['status'] == 'open' and row['closes_at'].date() >= today
+    }
+    return render_template('orders.html', orders=all_orders(),
+                           editable_window_ids=editable_window_ids, **lookups)
 
 @app.get('/offers')
 @require_login
@@ -361,6 +369,15 @@ def integrity(exc):
 
 @app.errorhandler(404)
 def not_found(exc): return jsonify(error='Route not found'),404
+
+@app.errorhandler(HTTPException)
+def http_error(exc):
+    if not request.path.startswith('/api/'):
+        return exc
+    response = exc.get_response()
+    response.set_data(app.json.dumps({'error': exc.name}))
+    response.mimetype = 'application/json'
+    return response
 
 @app.errorhandler(Exception)
 def server_error(exc):
