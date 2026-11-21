@@ -22,6 +22,9 @@ Configure the [environment template](.env.example) privately with the approved s
 
 - Physical [database ERD](docs/diagrams/database_erd.svg), [system architecture](docs/diagrams/architecture.svg) and [decision workflow](docs/diagrams/decision_workflow.svg). Editable sources and rendering commands are in the [diagram guide](docs/diagrams/README.md).
 - [Three verified end-to-end workflows](docs/END_TO_END_WORKFLOWS.md), including real browser/UI, API and MySQL persistence in a disposable test environment.
+- [Rubric matrix](docs/RUBRIC_COMPLIANCE_MATRIX.md), [impact/KPI chart and table](docs/IMPACT_AND_KPIS.md) and [primary evidence protocol](docs/PRIMARY_DATA_COLLECTION.md).
+- [Part C blueprint](docs/PART_C_REPORT_BLUEPRINT.md), [report evidence index](docs/REPORT_EVIDENCE_INDEX.md) and [5–8 minute demo outline](docs/DEMO_WALKTHROUGH.md).
+- Group 06 roster and contribution evidence, including [observed GitHub accounts and pending confirmations](docs/TEAM_CONTRIBUTIONS_AUDIT.md). The root README documents the earlier classroom stage.
 
 ## API (requires demo login session)
 
