@@ -6,11 +6,23 @@
   /
   {{ (metrics.otif_pct|string) ~ '%' if metrics.otif_pct is not none else '—' }}
 </strong></article></div>
-<h2>Compatible procurement batches</h2><p class="muted">The figures update when data changes in MySQL. Scenario results are not field-validated benefits unless supported by primary evidence.</p>
+<h2>Compatible procurement batches</h2><p class="muted">Batch recommendations are proposals. Capacity reservations are recorded separately. Savings shown here are estimates based on the supplied orders and quotes.</p>
 {% if not batches %}<section class="panel">No committed demand yet. Use Retailer demand to add orders.</section>{% endif %}
-{% for b in batches %}<section class="panel"><div class="between"><h3>Window {{b.window_id}} · {{b.area}} · {{b.needed_date}}</h3><span class="tag {{'success' if b.decision=='ACCEPT' else 'reject'}}">{{b.decision}}</span></div><p>{{b.reason}}</p>
-<div class="metrics small"><article><span>Compatible quantity</span><strong>{{b.quantity_kg}} kg</strong></article><article><span>Individual baseline</span><strong>R{{'%.2f'|format(b.baseline_cost_per_kg)}}/kg</strong></article><article><span>Best feasible option</span><strong>{% if b.best %}R{{'%.2f'|format(b.best.cost_per_kg)}}/kg{% else %}—{% endif %}</strong></article><article><span>Difference vs baseline</span><strong>{{b.savings_pct if b.savings_pct is not none else '—'}}%</strong></article></div>
+{% for b in batches %}<section class="panel"><div class="between"><h3>Window {{b.window_id}} · {{b.area}} · {{b.needed_date}}</h3><span class="tag {{'success' if b.proposed_offer_id is not none else 'reject'}}">{{b.decision}}</span></div><p>{{b.reason}}</p>
+<div class="metrics small">
+  <article><span>Compatible quantity</span><strong>{{b.quantity_kg}} kg</strong></article>
+  <article><span>Individual baseline</span><strong>R{{'%.2f'|format(b.baseline_cost_per_kg)}}/kg</strong></article>
+  <article><span>{{'Proposed supplier quote' if b.proposed_offer_id is not none else 'Supplier quote'}}</span><strong>{% if b.best %}R{{'%.2f'|format(b.best.cost_per_kg)}}/kg{% else %}—{% endif %}</strong></article>
+  <article><span>Potential savings vs baseline</span><strong>{{b.recommended_savings_pct}}%</strong></article>
+</div>
 <p class="muted">Evidence: {{b.evidence_type}} · Baseline trips: {{b.baseline_trips}} · Distance: {{b.baseline_distance_km}} km. {% if b.best %}Coordinated trips: {{b.best.delivery_trips}} · Distance: {{b.best.distance_km}} km.{% endif %}</p>
-<div class="scroll"><table><caption>Feasibility and total delivered cost</caption><thead><tr><th>Supplier</th><th>Available kg</th><th>Price tier from kg</th><th>Total</th><th>Cost/kg</th><th>Decision explanation</th></tr></thead><tbody>{% for v in b.offers %}<tr><td>{{v.supplier}}</td><td>{{v.available_kg}}</td><td>{{v.tier_min_kg or '—'}}</td><td>{{'R%.2f'|format(v.total_cost) if v.total_cost is not none else '—'}}</td><td>{{'R%.2f'|format(v.cost_per_kg) if v.cost_per_kg is not none else '—'}}</td><td>{{'Eligible' if v.eligible else v.reasons|join('; ')}}</td></tr>{% endfor %}</tbody></table></div>
-{% if b.decision in ['ACCEPT', 'INDIVIDUAL_PROCUREMENT'] and b.allocated_costs %}<p class="muted">Procurement cost by retailer (proportional to kg, final retailer absorbs rounding): {% for a in b.allocated_costs %}{{a.retailer}} R{{a.allocated_cost}}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}</section>{% endfor %}
+<div class="scroll"><table><caption>Supplier quotes and delivered cost</caption>
+  <thead><tr><th>Supplier</th><th>Unreserved kg</th><th>Price tier from kg</th><th>Total</th><th>Cost/kg</th><th>Batch eligibility</th></tr></thead>
+  <tbody>{% for v in b.offers %}
+    <tr><td>{{v.supplier}}</td><td>{{v.available_kg}}</td><td>{{v.tier_min_kg or '—'}}</td><td>{{'R%.2f'|format(v.total_cost) if v.total_cost is not none else '—'}}</td><td>{{'R%.2f'|format(v.cost_per_kg) if v.cost_per_kg is not none else '—'}}</td><td>
+      {% if b.proposed_offer_id == v.offer_id %}Proposed{% elif v.eligible %}Eligible for this batch{% else %}{{v.reasons|join('; ')}}{% endif %}
+    </td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% if b.proposed_offer_id is not none and b.allocated_costs %}<p class="muted">Proposed cost by retailer, proportional to kg with a rounding adjustment on the final order.</p><ul>{% for a in b.allocated_costs %}<li>{{a.retailer}} R{{a.allocated_cost}}</li>{% endfor %}</ul>{% endif %}</section>{% endfor %}
 {% endblock %}

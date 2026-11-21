@@ -203,5 +203,101 @@ class TestDecisions(unittest.TestCase):
             self.evaluate_one(offers=[invalid_offer])
 
 
+class TestJointCapacity(unittest.TestCase):
+    def test_two_400_kg_batches_share_one_650_kg_offer(self):
+        orders = [order(1, 200), order(2, 200),
+                  order(3, 200, window=2), order(4, 200, window=2)]
+        first, second = evaluate(orders, [offer(1)], tiers(), as_of=TODAY)
+
+        self.assertEqual(first["decision"], "ACCEPT")
+        self.assertEqual(second["decision"], "REJECT_NO_FEASIBLE_SUPPLIER")
+        self.assertEqual(first["proposed_offer_id"], 1)
+        self.assertIsNone(second["proposed_offer_id"])
+        self.assertIsNone(second["best"])
+        self.assertTrue(second["offers"][0]["eligible"])
+        self.assertIn("shared capacity", second["reason"])
+        self.assertEqual(second["recommended_savings_pct"], 0)
+        self.assertEqual(second["allocated_costs"], [])
+        self.assertEqual(first["best"]["total_cost"] + second["baseline_total"], 73150)
+
+    def test_two_suppliers_move_the_flexible_batch_to_the_second_quote(self):
+        orders = [order(1, 200), order(2, 200),
+                  order(3, 200, window=2, needed_date="2026-11-24"),
+                  order(4, 200, window=2, needed_date="2026-11-24")]
+        slower = offer(2, capacity=400)
+        slower["lead_days"] = 10
+
+        flexible, urgent = evaluate(
+            orders, [offer(1), slower], tiers() + tiers(2, price=87), as_of=TODAY,
+        )
+
+        self.assertEqual([flexible["decision"], urgent["decision"]], ["ACCEPT", "ACCEPT"])
+        self.assertEqual(flexible["proposed_offer_id"], 2)
+        self.assertEqual(urgent["proposed_offer_id"], 1)
+        self.assertEqual(flexible["best"]["offer_id"], 2)
+        self.assertEqual(urgent["best"]["offer_id"], 1)
+        self.assertEqual(flexible["best"]["total_cost"] + urgent["best"]["total_cost"], 69900)
+
+    def test_reservations_in_all_windows_reduce_available_capacity(self):
+        orders = [order(1, 200), order(2, 200),
+                  order(3, 200, window=2), order(4, 200, window=2)]
+        reserved = {(1, 1): 150, (1, 3): 50}
+        results = evaluate(orders, [offer(1, capacity=950)], tiers(),
+                           reserved=reserved, as_of=TODAY)
+
+        self.assertEqual([r["offers"][0]["available_kg"] for r in results], [750, 750])
+        self.assertEqual([r["proposed_offer_id"] for r in results], [1, None])
+        self.assertEqual(reserved, {(1, 1): 150, (1, 3): 50})
+
+    def test_two_smaller_batches_can_save_more_than_one_larger_batch(self):
+        orders = [order(1, 200), order(2, 200),
+                  order(3, 150, window=2), order(4, 150, window=2),
+                  order(5, 150, window=3), order(6, 150, window=3)]
+        large, small_a, small_b = evaluate(orders, [offer(1)], tiers(), as_of=TODAY)
+
+        self.assertEqual([r["proposed_offer_id"] for r in (large, small_a, small_b)],
+                         [None, 1, 1])
+        self.assertEqual(large["baseline_total"] + small_a["best"]["total_cost"]
+                         + small_b["best"]["total_cost"], 90500)
+
+    def test_individual_better_quote_uses_the_same_shared_capacity(self):
+        orders = [order(1, 200), order(2, 200), order(3, 400, baseline=110, window=2)]
+        group, individual = evaluate(orders, [offer(1)], tiers(), as_of=TODAY)
+
+        self.assertIsNone(group["proposed_offer_id"])
+        self.assertEqual(individual["decision"], "INDIVIDUAL_BETTER_QUOTE")
+        self.assertEqual(individual["proposed_offer_id"], 1)
+
+    def test_tied_plan_and_cost_shares_are_input_order_independent(self):
+        orders = [order(1, 100.05), order(2, 299.95),
+                  order(3, 125, window=2), order(4, 275, window=2)]
+        offers = [offer(2), offer(1)]
+        price_tiers = tiers(2) + tiers()
+
+        results = evaluate(orders, offers, price_tiers, as_of=TODAY)
+        reversed_results = evaluate(orders[::-1], offers[::-1], price_tiers[::-1], as_of=TODAY)
+
+        self.assertEqual(results, reversed_results)
+        self.assertEqual([r["proposed_offer_id"] for r in results], [1, 2])
+
+    def test_oversized_conflict_uses_baseline_with_an_explicit_reason(self):
+        # Seventeen batches with one cheaper offer each have 2**17 combinations.
+        orders = [order(i, 400, window=i) for i in range(1, 18)]
+        results = evaluate(orders, [offer(1)], tiers(), as_of=TODAY)
+
+        self.assertEqual(len(results), 17)
+        for batch in results:
+            self.assertEqual(batch["decision"], "REJECT_PLANNING_LIMIT")
+            self.assertIn("planning limit", batch["reason"])
+            self.assertIsNone(batch["proposed_offer_id"])
+            self.assertEqual(batch["recommended_savings_pct"], 0)
+
+    def test_large_feasible_set_can_use_the_cheapest_offer_for_each_batch(self):
+        orders = [order(i, 400, window=i) for i in range(1, 18)]
+        results = evaluate(orders, [offer(1, capacity=6800)], tiers(), as_of=TODAY)
+
+        self.assertEqual([r["proposed_offer_id"] for r in results], [1] * 17)
+
+
 if __name__ == "__main__":
     unittest.main()
