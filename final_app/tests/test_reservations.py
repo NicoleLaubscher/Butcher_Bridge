@@ -208,6 +208,55 @@ class TestDecisionRoutes(unittest.TestCase):
         self.assertIn("Potential savings vs baseline</span><strong>6.38%", html)
         self.assertIn("Actual fill rate", html)
 
+    def test_decision_api_and_dashboard_separate_proposal_costs_from_diagnostics(self):
+        regular = self.orders[0]["needed_date"]
+        self.allocations = []
+        self.orders = [
+            order(1, Decimal("40.00"), baseline=70, logistics=0, retailer_id=10, needed_date=regular),
+            order(2, Decimal("60.00"), baseline=70, logistics=0, retailer_id=10, needed_date=regular),
+            order(3, Decimal("100.00"), baseline=120, logistics=0, retailer_id=20, needed_date=regular),
+            order(4, 100, baseline=70, logistics=0, retailer_id=30, window=2, needed_date=regular),
+            order(5, 100, baseline=70, logistics=0, retailer_id=40, window=2, needed_date=regular),
+            order(6, 100, baseline=70, logistics=0, retailer_id=50, window=3, needed_date=regular),
+        ]
+
+        response = self.client.get("/api/decisions")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        proposal, rejected, individual_baseline = payload["items"]
+        self.assertEqual(proposal["decision"], "ACCEPT")
+        self.assertEqual(proposal["best"]["total_cost"], 17350.0)
+        self.assertAlmostEqual(proposal["recommended_savings_pct"], 8.68)
+        self.assertEqual([row["proposed_cost"] for row in proposal["proposed_retailer_costs"]],
+                         ["6392.11", "10957.89"])
+        self.assertEqual(proposal["proposed_retailer_costs"][0]["orders"], [
+            {"order_id": 1, "proposed_cost": "2556.84"},
+            {"order_id": 2, "proposed_cost": "3835.27"},
+        ])
+        self.assertEqual(rejected["decision"], "REJECT_NOT_CHEAPER")
+        self.assertEqual(individual_baseline["decision"], "INDIVIDUAL_KEEP_BASELINE")
+        for batch in (rejected, individual_baseline):
+            self.assertEqual(batch["proposed_retailer_costs"], [])
+            self.assertTrue(batch["allocated_costs"])
+        for batch in payload["items"]:
+            for row in batch["allocated_costs"]:
+                self.assertEqual(set(row), {"order_id", "retailer", "allocated_cost"})
+                self.assertIsInstance(row["allocated_cost"], float)
+        self.assertEqual(payload["proposed_reservation_totals"], [
+            {"offer_id": 1, "window_id": 1, "quantity_kg": "200.00"},
+        ])
+
+        dashboard = self.client.get("/")
+        self.assertEqual(dashboard.status_code, 200)
+        html = dashboard.get_data(as_text=True)
+        self.assertEqual(html.count("<caption>Proposed retailer costs</caption>"), 1)
+        self.assertEqual(html.count('<th scope="row">R10</th>'), 1)
+        self.assertIn("R6392.11", html)
+        self.assertIn("R10957.89", html)
+        for retailer in ("R30", "R40", "R50"):
+            self.assertNotIn(f">{retailer}<", html)
+
     def test_get_decisions_returns_empty_totals_without_committed_demand(self):
         self.orders = []
 

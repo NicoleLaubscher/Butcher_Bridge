@@ -3,7 +3,8 @@
 
 from collections import defaultdict
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
+from fractions import Fraction
 
 if __package__:
     from .joint_capacity_planner import plan_offers
@@ -144,6 +145,59 @@ def validate_supplier_inputs(offers, tiers, reserved, min_fill):
         )
 
 
+def _apportion_cents(total_cents, weights):
+    """Divide whole cents by exact weights, with ascending IDs breaking ties."""
+    if total_cents == 0:
+        return dict.fromkeys(weights, 0)
+
+    total_weight = sum(weights.values())
+    shares = {}
+    remainders = {}
+    for identifier, weight in weights.items():
+        shares[identifier], remainders[identifier] = divmod(total_cents * weight, total_weight)
+
+    remaining = total_cents - sum(shares.values())
+    remainder_order = sorted(
+        remainders, key=lambda identifier: (-remainders[identifier], identifier),
+    )
+    for identifier in remainder_order[:remaining]:
+        shares[identifier] += 1
+    return shares
+
+
+def _quantity_weights(orders):
+    return {order["id"]: Fraction(D(order["quantity_kg"])) for order in orders}
+
+
+def _from_cents(cents):
+    return Decimal(cents).scaleb(-2)
+
+
+def _allocate_proposed_costs(total_cents, batch, retailer_caps):
+    retailer_cents = _apportion_cents(total_cents, retailer_caps)
+    orders_by_retailer = defaultdict(list)
+    for order in batch:
+        orders_by_retailer[order["retailer_id"]].append(order)
+
+    retailer_costs = []
+    order_costs = {}
+    for retailer_id, orders in sorted(orders_by_retailer.items()):
+        charge = retailer_cents[retailer_id]
+        order_cents = _apportion_cents(charge, _quantity_weights(orders))
+        order_costs.update(order_cents)
+        retailer_costs.append({
+            "retailer_id": retailer_id,
+            "retailer": orders[0]["retailer_name"],
+            "baseline_cap": format(_from_cents(retailer_caps[retailer_id]), "f"),
+            "proposed_cost": format(_from_cents(charge), "f"),
+            "orders": [
+                {"order_id": order_id, "proposed_cost": format(_from_cents(cents), "f")}
+                for order_id, cents in sorted(order_cents.items())
+            ],
+        })
+    return retailer_costs, order_costs
+
+
 def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
     """Evaluate batches using the capacity holds supplied by the caller."""
     batches, _ = _evaluate(orders, offers, tiers, reserved, min_fill, as_of)
@@ -215,11 +269,18 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
         batch = sorted(batch, key=lambda order: order["id"], reverse=True)
         q = sum(D(o["quantity_kg"]) for o in batch)
 
-        baseline = sum(
-            D(o["quantity_kg"]) * D(o["baseline_price_per_kg"])
-            + D(o["baseline_logistics_cost"])
-            for o in batch
-        )
+        retailer_baselines = defaultdict(Decimal)
+        for order in batch:
+            retailer_baselines[order["retailer_id"]] += (
+                D(order["quantity_kg"]) * D(order["baseline_price_per_kg"])
+                + D(order["baseline_logistics_cost"])
+            )
+        baseline = sum(retailer_baselines.values())
+        retailer_caps = {
+            retailer_id: int(amount.scaleb(2).to_integral_value(rounding=ROUND_FLOOR))
+            for retailer_id, amount in retailer_baselines.items()
+        }
+        max_recoverable_cost = _from_cents(sum(retailer_caps.values()))
 
         quotes = {}
 
@@ -278,14 +339,21 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
                     + D(offer["handling_cost"])
                 )
 
+            quote_cost = _round_money(total) if total is not None else None
+            cost_sharing_reason = None
+            if quote_cost is not None and max_recoverable_cost < quote_cost < baseline:
+                cost_sharing_reason = (
+                    "The quote is cheaper than the combined baseline. Its cost cannot be "
+                    "shared in whole cents within each retailer's baseline."
+                )
+
             quotes[offer["id"]] = {
                 "offer_id": offer["id"],
                 "supplier": offer["supplier_name"],
                 "eligible": not reasons,
                 "reasons": reasons,
-                "total_cost": (
-                    _round_money(total) if total is not None else None
-                ),
+                "total_cost": quote_cost,
+                "cost_sharing_reason": cost_sharing_reason,
                 "cost_per_kg": (
                     money(total / q) if total is not None else None
                 ),
@@ -310,25 +378,23 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
         savings = {
             quote["offer_id"]: baseline - quote["total_cost"]
             for quote in candidates
-            if quote["total_cost"] < baseline
+            if quote["total_cost"] < baseline and quote["cost_sharing_reason"] is None
         }
-        batches.append((key, batch, baseline, quotes, candidates))
+        batches.append((key, batch, baseline, quotes, candidates, retailer_caps))
         planner_inputs.append((q, savings))
 
     plan = plan_offers(planner_inputs, available_by_offer)
     outputs = []
     proposed_totals = defaultdict(Decimal)
 
-    for index, (key, batch, baseline, quotes, candidates) in enumerate(batches):
+    for index, (key, batch, baseline, quotes, candidates, retailer_caps) in enumerate(batches):
         window, product, need, area = key
         q, savings = planner_inputs[index]
         proposed_offer_id = plan.get(index) if plan is not None else None
         base_trips = sum(int(o["baseline_trips"]) for o in batch)
         base_distance = sum(D(o["baseline_distance_km"]) for o in batch)
 
-        retailer_count = len({
-            o["retailer_id"] for o in batch
-        })
+        retailer_count = len(retailer_caps)
 
         if proposed_offer_id is not None:
             best = quotes[proposed_offer_id]
@@ -380,6 +446,9 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
                         "requirements. Retailers should retain their "
                         "existing procurement arrangements."
                     )
+            elif best["cost_sharing_reason"] is not None:
+                decision = "REJECT_NOT_CHEAPER"
+                reason = best["cost_sharing_reason"] + " Keep the individual procurement baselines."
             elif retailer_count == 1:
                 decision = "INDIVIDUAL_KEEP_BASELINE"
                 reason = (
@@ -399,22 +468,23 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
         group_cost = best["total_cost"] if best is not None else None
 
         allocated = []
+        proposed_retailer_costs = []
 
-        if best is not None:
-            shares = [
-                _round_money(group_cost * D(o["quantity_kg"]) / q)
-                for o in batch[:-1]
-            ]
-
-            shares.append(group_cost - sum(shares))
-
+        if group_cost is not None:
+            total_cents = int(group_cost.scaleb(2))
+            if proposed_offer_id is not None:
+                proposed_retailer_costs, order_cents = _allocate_proposed_costs(
+                    total_cents, batch, retailer_caps,
+                )
+            else:
+                order_cents = _apportion_cents(total_cents, _quantity_weights(batch))
             allocated = [
                 {
                     "order_id": o["id"],
                     "retailer": o["retailer_name"],
-                    "allocated_cost": money(c),
+                    "allocated_cost": float(_from_cents(order_cents[o["id"]])),
                 }
-                for o, c in zip(batch, shares)
+                for o in batch
             ]
 
         savings_pct = (
@@ -450,6 +520,7 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
             "savings_pct": savings_pct,
             "recommended_savings_pct": recommended_savings_pct,
             "allocated_costs": allocated,
+            "proposed_retailer_costs": proposed_retailer_costs,
             "evidence_type": (
                 "primary"
                 if all(
