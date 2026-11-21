@@ -1,0 +1,16 @@
+{% extends 'layout.html' %}{% block content %}<div class="hero"><small>SUPPLY CHAIN ENGINEERING • LIVE MYSQL</small><h1>Make aggregation earn its place.</h1><p>Group only compatible, committed demand. Reject options that cannot meet constraints or fail to beat the baseline.</p></div>
+<div class="metrics"><article><span>Orders recorded</span><strong>{{metrics.orders}}</strong></article><article><span>Committed demand</span><strong>{{metrics.committed_kg|round(1)}} kg</strong></article><article><span>Actual fill rate</span><strong>{{metrics.fill_pct if metrics.fill_pct is not none else '—'}}{% if metrics.fill_pct is not none %}%{% endif %}</strong></article><article>
+<span>On-time / Strict OTIF</span>
+<strong>
+  {{ (metrics.on_time_pct|string) ~ '%' if metrics.on_time_pct is not none else '—' }}
+  /
+  {{ (metrics.otif_pct|string) ~ '%' if metrics.otif_pct is not none else '—' }}
+</strong></article></div>
+<h2>Compatible procurement batches</h2><p class="muted">The figures update when data changes in MySQL. Scenario results are not field-validated benefits unless supported by primary evidence.</p>
+{% if not batches %}<section class="panel">No committed demand yet. Use Retailer demand to add orders.</section>{% endif %}
+{% for b in batches %}<section class="panel"><div class="between"><h3>Window {{b.window_id}} · {{b.area}} · {{b.needed_date}}</h3><span class="tag {{'success' if b.decision=='ACCEPT' else 'reject'}}">{{b.decision}}</span></div><p>{{b.reason}}</p>
+<div class="metrics small"><article><span>Compatible quantity</span><strong>{{b.quantity_kg}} kg</strong></article><article><span>Individual baseline</span><strong>R{{'%.2f'|format(b.baseline_cost_per_kg)}}/kg</strong></article><article><span>Best feasible option</span><strong>{% if b.best %}R{{'%.2f'|format(b.best.cost_per_kg)}}/kg{% else %}—{% endif %}</strong></article><article><span>Difference vs baseline</span><strong>{{b.savings_pct if b.savings_pct is not none else '—'}}%</strong></article></div>
+<p class="muted">Evidence: {{b.evidence_type}} · Baseline trips: {{b.baseline_trips}} · Distance: {{b.baseline_distance_km}} km. {% if b.best %}Coordinated trips: {{b.best.delivery_trips}} · Distance: {{b.best.distance_km}} km.{% endif %}</p>
+<div class="scroll"><table><caption>Feasibility and total delivered cost</caption><thead><tr><th>Supplier</th><th>Available kg</th><th>Price tier from kg</th><th>Total</th><th>Cost/kg</th><th>Decision explanation</th></tr></thead><tbody>{% for v in b.offers %}<tr><td>{{v.supplier}}</td><td>{{v.available_kg}}</td><td>{{v.tier_min_kg or '—'}}</td><td>{{'R%.2f'|format(v.total_cost) if v.total_cost is not none else '—'}}</td><td>{{'R%.2f'|format(v.cost_per_kg) if v.cost_per_kg is not none else '—'}}</td><td>{{'Eligible' if v.eligible else v.reasons|join('; ')}}</td></tr>{% endfor %}</tbody></table></div>
+{% if b.decision in ['ACCEPT', 'INDIVIDUAL_PROCUREMENT'] and b.allocated_costs %}<p class="muted">Procurement cost by retailer (proportional to kg, final retailer absorbs rounding): {% for a in b.allocated_costs %}{{a.retailer}} R{{a.allocated_cost}}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}</section>{% endfor %}
+{% endblock %}
