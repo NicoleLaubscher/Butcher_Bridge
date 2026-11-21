@@ -10,7 +10,7 @@ Do not present fictional demo input as field results. Obtain informed permission
 | Retailer transport cost | baseline logistics | R/order and R/kg | receipt or documented estimate |
 | Procurement trips and distance | baseline trips/distance | trips, km | log/route measurement |
 | Supplier price tiers | offer tiers | minimum kg, R/kg | dated supplier quote |
-| Supplier capacity | offer capacity | kg/window | supplier confirmation |
+| Supplier capacity | offer capacity | kg per offer, shared across windows in this model | supplier confirmation, including when capacity resets in practice |
 | Supplier lead time | offer lead_days | days | supplier quote |
 | Supplier fill rate | offer fill_rate | fraction 0–1 | history or declared estimate |
 | On-time fulfilment | fulfilment | delivered/ordered, dates | dispatch/delivery records |

@@ -5,6 +5,7 @@
 | Database ERD | [database_erd.mmd](database_erd.mmd) | [database_erd.svg](database_erd.svg) | All nine physical tables and every declared FK |
 | System architecture | [architecture.mmd](architecture.mmd) | [architecture.svg](architecture.svg) | Browser, Flask, MySQL, read/write boundaries and planning |
 | Decision workflow | [decision_workflow.mmd](decision_workflow.mmd) | [decision_workflow.svg](decision_workflow.svg) | Demand, supplier evaluation, proposals and actual outcomes |
+| Simulated cost comparison | [generate_impact_chart.py](../../scripts/generate_impact_chart.py) | [simulated_plan_costs.svg](simulated_plan_costs.svg) | Before and after plan costs calculated from production fixtures |
 
 ## Physical model details
 
@@ -35,3 +36,10 @@ npx --yes --package @mermaid-js/mermaid-cli mmdc -c mermaid-config.json -i decis
 ```
 
 The CLI uses Chromium. Choose a local browser with its documented Puppeteer config if the default download is unavailable. These are documentation tools installed separately from Flask. The SVGs are suitable for scaling in an appendix. Use a landscape page or zoomed subsections if the full ERD labels do not fit.
+
+Run the chart generator from the repository root in a Python environment with Matplotlib.
+
+```bash
+python -m pip install matplotlib
+python -B final_app/scripts/generate_impact_chart.py
+```
