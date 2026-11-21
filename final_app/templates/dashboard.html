@@ -6,7 +6,7 @@
   /
   {{ (metrics.otif_pct|string) ~ '%' if metrics.otif_pct is not none else '—' }}
 </strong></article></div>
-<h2>Compatible procurement batches</h2><p class="muted">Batch recommendations are proposals. Capacity reservations are recorded separately. Savings shown here are estimates based on the supplied orders and quotes.</p>
+<h2>Compatible procurement batches</h2><p class="muted">Batch recommendations are proposals. Review existing holds before recording a reservation. Savings shown here are estimates based on the supplied orders and quotes.</p>
 {% if not batches %}<section class="panel">No committed demand yet. Use Retailer demand to add orders.</section>{% endif %}
 {% for b in batches %}<section class="panel"><div class="between"><h3>Window {{b.window_id}} · {{b.area}} · {{b.needed_date}}</h3><span class="tag {{'success' if b.proposed_offer_id is not none else 'reject'}}">{{b.decision}}</span></div><p>{{b.reason}}</p>
 <div class="metrics small">
@@ -17,11 +17,15 @@
 </div>
 <p class="muted">Evidence: {{b.evidence_type}} · Baseline trips: {{b.baseline_trips}} · Distance: {{b.baseline_distance_km}} km. {% if b.best %}Coordinated trips: {{b.best.delivery_trips}} · Distance: {{b.best.distance_km}} km.{% endif %}</p>
 <div class="scroll"><table><caption>Supplier quotes and delivered cost</caption>
-  <thead><tr><th>Supplier</th><th>Unreserved kg</th><th>Price tier from kg</th><th>Total</th><th>Cost/kg</th><th>Batch eligibility</th></tr></thead>
+  <thead><tr><th>Supplier</th><th>Reserved kg across windows</th><th>Unreserved kg</th><th>Price tier from kg</th><th>Total</th><th>Cost/kg</th><th>Batch eligibility</th><th>New reservation key</th></tr></thead>
   <tbody>{% for v in b.offers %}
-    <tr><td>{{v.supplier}}</td><td>{{v.available_kg}}</td><td>{{v.tier_min_kg or '—'}}</td><td>{{'R%.2f'|format(v.total_cost) if v.total_cost is not none else '—'}}</td><td>{{'R%.2f'|format(v.cost_per_kg) if v.cost_per_kg is not none else '—'}}</td><td>
-      {% if b.proposed_offer_id == v.offer_id %}Proposed{% elif v.eligible %}Eligible for this batch{% else %}{{v.reasons|join('; ')}}{% endif %}
-    </td></tr>
+    <tr>
+      <td>{{v.supplier}}{% if b.proposed_offer_id == v.offer_id %} <span class="tag success">Proposed purchase</span>{% endif %}</td>
+      <td>{{v.reserved_kg}}</td><td>{{v.available_kg}}</td><td>{{v.tier_min_kg or '—'}}</td>
+      <td>{{'R%.2f'|format(v.total_cost) if v.total_cost is not none else '—'}}</td><td>{{'R%.2f'|format(v.cost_per_kg) if v.cost_per_kg is not none else '—'}}</td>
+      <td>{{'Eligible for this batch' if v.eligible else v.reasons|join('; ')}}</td>
+      <td>{% if v.reservation_key_status == 'free' %}Free{% elif v.reservation_key_status %}Occupied ({{v.reservation_key_status}}){% else %}Unknown{% endif %}</td>
+    </tr>
   {% endfor %}</tbody>
 </table></div>
 {% if b.proposed_offer_id is not none and b.allocated_costs %}<p class="muted">Proposed cost by retailer, proportional to kg with a rounding adjustment on the final order.</p><ul>{% for a in b.allocated_costs %}<li>{{a.retailer}} R{{a.allocated_cost}}</li>{% endfor %}</ul>{% endif %}</section>{% endfor %}

@@ -145,7 +145,36 @@ def validate_supplier_inputs(offers, tiers, reserved, min_fill):
 
 
 def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
-    """Propose capacity-feasible procurement for pre-formed compatible batches."""
+    """Evaluate batches using the capacity holds supplied by the caller."""
+    batches, _ = _evaluate(orders, offers, tiers, reserved, min_fill, as_of)
+    return batches
+
+
+def evaluate_plan(orders, offers, tiers, allocations, min_fill=0.95, as_of=None):
+    """Return batch decisions and Decimal proposal totals for fresh allocation keys."""
+    reserved = {}
+    allocation_statuses = {}
+    for allocation in allocations:
+        key = (allocation["offer_id"], allocation["window_id"])
+        status = allocation["status"]
+        if key in allocation_statuses:
+            raise ValueError(
+                "Multiple allocation rows share an offer and window. "
+                "Review reservations before planning."
+            )
+        if status not in ("reserved", "released"):
+            raise ValueError("Unrecognised allocation status. Review reservations before planning.")
+        allocation_statuses[key] = status
+        if status == "reserved":
+            reserved[key] = allocation["quantity_kg"]
+
+    return _evaluate(
+        orders, offers, tiers, reserved, min_fill, as_of,
+        allocation_statuses=allocation_statuses,
+    )
+
+
+def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_statuses=None):
     as_of = as_of or date.today()
     reserved = reserved or {}
 
@@ -182,7 +211,7 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
     planner_inputs = []
 
     for key, batch in sorted(groups.items()):
-        _, product, need, area = key
+        window, product, need, area = key
         batch = sorted(batch, key=lambda order: order["id"], reverse=True)
         q = sum(D(o["quantity_kg"]) for o in batch)
 
@@ -264,23 +293,33 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
                     float(best_tier["min_quantity_kg"])
                     if best_tier else None
                 ),
+                "reserved_kg": float(reserved_by_offer[offer["id"]]),
                 "available_kg": float(available),
+                "reservation_key_status": (
+                    allocation_statuses.get((offer["id"], window), "free")
+                    if allocation_statuses is not None else None
+                ),
                 "delivery_trips": int(offer["coordinated_trips"]),
                 "distance_km": float(offer["coordinated_distance_km"]),
             }
 
+        candidates = [
+            quote for quote in quotes.values()
+            if quote["eligible"] and quote["reservation_key_status"] in (None, "free")
+        ]
         savings = {
-            offer_id: baseline - quote["total_cost"]
-            for offer_id, quote in quotes.items()
-            if quote["eligible"] and quote["total_cost"] < baseline
+            quote["offer_id"]: baseline - quote["total_cost"]
+            for quote in candidates
+            if quote["total_cost"] < baseline
         }
-        batches.append((key, batch, baseline, quotes))
+        batches.append((key, batch, baseline, quotes, candidates))
         planner_inputs.append((q, savings))
 
     plan = plan_offers(planner_inputs, available_by_offer)
     outputs = []
+    proposed_totals = defaultdict(Decimal)
 
-    for index, (key, batch, baseline, quotes) in enumerate(batches):
+    for index, (key, batch, baseline, quotes, candidates) in enumerate(batches):
         window, product, need, area = key
         q, savings = planner_inputs[index]
         proposed_offer_id = plan.get(index) if plan is not None else None
@@ -293,6 +332,7 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
 
         if proposed_offer_id is not None:
             best = quotes[proposed_offer_id]
+            proposed_totals[(proposed_offer_id, window)] += q
             if retailer_count == 1:
                 decision = "INDIVIDUAL_BETTER_QUOTE"
                 reason = (
@@ -323,17 +363,23 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
 
         else:
             best = min(
-                (quote for quote in quotes.values() if quote["eligible"]),
+                candidates,
                 key=lambda quote: quote["total_cost"],
                 default=None,
             )
             if best is None:
                 decision = "REJECT_NO_FEASIBLE_SUPPLIER"
-                reason = (
-                    "No eligible supplier satisfies the procurement "
-                    "requirements. Retailers should retain their "
-                    "existing procurement arrangements."
-                )
+                if any(quote["eligible"] for quote in quotes.values()):
+                    reason = (
+                        "The eligible quotes already have allocation rows for this "
+                        "window. Review the existing reservations before booking."
+                    )
+                else:
+                    reason = (
+                        "No eligible supplier satisfies the procurement "
+                        "requirements. Retailers should retain their "
+                        "existing procurement arrangements."
+                    )
             elif retailer_count == 1:
                 decision = "INDIVIDUAL_KEEP_BASELINE"
                 reason = (
@@ -414,4 +460,4 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
             ),
         })
 
-    return outputs
+    return outputs, dict(proposed_totals)

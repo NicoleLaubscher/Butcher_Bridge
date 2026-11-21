@@ -42,7 +42,7 @@ In `.env`: set the *same* shared DB_HOST/DB_PORT/DB_NAME for all teammates; DB_U
 | PATCH | `/api/orders/1` | Update before window closes |
 | GET | `/api/offers` | List offers |
 | POST | `/api/offers` | Create offer and tiers |
-| GET | `/api/decisions` | Batch recommendations and quote comparisons. `proposed_offer_id` is the proposed offer or `null` for baseline procurement. |
+| GET | `/api/decisions` | Read-only batch recommendations, quote comparisons and proposed reservation totals. |
 | GET | `/api/kpis` | Real DB KPI counts and actual fulfilment statistics |
 | POST | `/api/allocations` | Reserve supplier capacity transactionally |
 | POST | `/api/fulfilments` | Record completed order and update its status |
@@ -67,7 +67,17 @@ Capacity is shared by offer ID across all windows. Every MySQL allocation with s
 
 If each batch's cheapest choice fits alongside the others, their sum gives the exact minimum. Otherwise the search counts combinations by multiplying the number of cheaper eligible offers plus one baseline choice for each batch. Conflicts above 100,000 combinations retain the baselines and return `REJECT_PLANNING_LIMIT` for batches that had cheaper eligible quotes.
 
-`proposed_offer_id` identifies a supplier proposal. `recommended_savings_pct` compares the plan choice with the baseline and is zero when the batch keeps its baseline. `savings_pct` and `allocated_costs` describe the displayed quotation and its proportional cost shares. Capacity reservations are recorded through a separate `POST /api/allocations` request that checks current capacity before writing.
+In `items`, a quote's `reserved_kg` and `available_kg` are offer totals across all windows before applying any proposals. `eligible` describes whether the quote satisfies this batch's requirements on its own. `reservation_key_status` is `free`, `reserved` or `released` for the quote's offer and batch window. Both allocation statuses occupy the unique key, so only independently eligible quotes with a free key can be proposed for a new reservation.
+
+`proposed_offer_id` identifies the supplier selected by the joint plan, or is `null` for baseline procurement. `recommended_savings_pct` compares the plan choice with the baseline and is zero when the batch keeps its baseline. `savings_pct` and `allocated_costs` describe the displayed quotation and its proportional cost shares.
+
+`proposed_reservation_totals` is an array sorted by offer ID and window ID. It contains one entry per selected pair with `quantity_kg` as an exact decimal string without rounding or exponent notation. The total combines selected batch quantities for capacity only. Each batch retains its own price tier and delivery cost. An empty array means the plan made no new capacity proposals.
+
+```json
+[{"offer_id": 2, "window_id": 1, "quantity_kg": "400.30"}]
+```
+
+Free keys and proposed totals reflect the data read during evaluation. Existing holds require review because the schema records them at offer and window level. Duplicate allocation keys or unrecognised statuses return HTTP 400 with an explanation. Capacity reservations are recorded through a separate `POST /api/allocations` request that checks current capacity before writing.
 
 ## Reset, backup, collaboration and limitations
 
@@ -75,6 +85,6 @@ Before changing schema, take a provider snapshot or a `mysqldump --single-transa
 
 Schema is version 1. For later database changes, create numbered SQL migrations; do not edit the shared schema silently. Query failures roll back changes and are logged to console. Prefer PRs with individual meaningful commits; review and test before merging.
 
-**Not production-ready:** uses a group demo password rather than individual role-based authentication; no separate app-host deployment configured; route-distance is supplied evidence rather than automatic route optimisation; withdrawals after closing require manual review; reservation API is intentionally separated from the recommendation rather than automatic ordering; no physical cold-chain compliance verification. Add role-based authentication, audit permissions, CSRF protection and HTTPS before allowing public users. Current tests exercise decision rules only and do not constitute a live cloud MySQL end-to-end test. These are transparent limits for the final report.
+**Not production-ready:** uses a group demo password rather than individual role-based authentication; no separate app-host deployment configured; route-distance is supplied evidence rather than automatic route optimisation; withdrawals after closing require manual review; reservation API is intentionally separated from the recommendation rather than automatic ordering; no physical cold-chain compliance verification. Add role-based authentication, audit permissions, CSRF protection and HTTPS before allowing public users. Tests exercise the decision rules and Flask routes with simulated data. These are transparent limits for the final report.
 
 See `docs/PRIMARY_DATA_COLLECTION.md`, `docs/VIDEO_SCRIPT_OUTLINE.md`, `docs/REPORT_STRUCTURE.md`.
