@@ -43,6 +43,7 @@ In `.env`: set the *same* shared DB_HOST/DB_PORT/DB_NAME for all teammates; DB_U
 | GET | `/api/offers` | List offers |
 | POST | `/api/offers` | Create offer and tiers |
 | GET | `/api/decisions` | Read-only batch recommendations, quote comparisons and proposed reservation totals. |
+| GET | `/api/decisions?grouping=optimised` | Opt-in retailer-group planning and explicit search status. |
 | GET | `/api/kpis` | Real DB KPI counts and actual fulfilment statistics |
 | POST | `/api/allocations` | Reserve supplier capacity transactionally |
 | POST | `/api/fulfilments` | Record completed order and update its status |
@@ -78,6 +79,24 @@ In `items`, a quote's `reserved_kg` and `available_kg` are offer totals across a
 ```
 
 Free keys and proposed totals reflect the data read during evaluation. Existing holds require review because the schema records them at offer and window level. Duplicate allocation keys or unrecognised statuses return HTTP 400 with an explanation. Capacity reservations are recorded through a separate `POST /api/allocations` request that checks current capacity before writing.
+
+## Retailer-group optimisation
+
+Fixed batches remain the default on the dashboard and at `GET /api/decisions`. Choose **Optimise retailer groups** on the dashboard or request `GET /api/decisions?grouping=optimised` to opt in. All committed orders for a retailer within one compatibility bucket form one indivisible bundle. Each bundle appears in exactly one multi-retailer purchase, individual supplier purchase or individual baseline. The plan minimises the combined cost of those choices across all buckets, using the same feasibility, capacity, reservation and whole-cent cost-sharing rules as fixed batches.
+
+The opt-in response adds `planning_status` and `fallback_reason`. A status of `exact` means the search proved the least-cost plan within the model and `fallback_reason` is `null`. A status of `fallback` gives the reason and returns a fresh fixed-batch plan for the complete set of orders. The fixed-batch planner keeps the baselines if its own limit is reached. Both opt-in statuses include `group_id` based on the sorted original order IDs, `retailer_ids`, `order_ids`, a `source_bucket` with the window, product, date and area, and `procurement` (`supplier` or `baseline`) on each item. `proposed_offer_id` identifies the selected offer and is `null` for baseline procurement.
+
+The new search has three server-side limits. Set a nonnegative integer for each using its environment variable or the corresponding Flask config key.
+
+| Setting | Default | What it bounds |
+|---|---:|---|
+| `GROUP_PLANNING_MAX_RETAILERS` | 8 | Retailer bundles in any one compatibility bucket |
+| `GROUP_PLANNING_MAX_QUOTE_EVALUATIONS` | 5,000 | Subsets paired with active product-matching offers across the request, before the remaining quote checks |
+| `GROUP_PLANNING_MAX_SEARCH_NODES` | 100,000 | Nodes visited in the exact search across all buckets |
+
+Eight retailers can generate 255 nonempty subsets before assigning offers. The search processes bundles and ties in a stable order. When any limit is exceeded, the fixed-batch plan is the only result shown. Its status remains `fallback` even if it finds the best fixed-batch assignment.
+
+`proposed_retailer_costs` and `proposed_reservation_totals` keep their existing formats. Each selected group is priced as a separate purchase with its own tier and delivery charge. Proposed capacity for groups sharing a free offer/window key is summed into one reservation total. Confirm that the supplier will honour the prices for separate purchases before booking. Decisions remain advisory and use the capacity and holds read for the request.
 
 ## Proposed retailer costs
 

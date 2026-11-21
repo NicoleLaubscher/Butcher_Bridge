@@ -8,7 +8,8 @@ from flask import Flask, jsonify, render_template, request, session, redirect, u
 from dotenv import load_dotenv
 from pymysql.err import IntegrityError
 from db import query, transaction
-from decision_engine import evaluate_plan
+from decision_engine import evaluate_optimised_plan, evaluate_plan
+from group_formation_planner import GroupPlanningLimits
 
 load_dotenv(override=True)
 app=Flask(__name__)
@@ -16,6 +17,18 @@ app.secret_key=os.getenv('SECRET_KEY','')
 app.config['SESSION_COOKIE_HTTPONLY']=True
 app.config['SESSION_COOKIE_SAMESITE']='Lax'
 app.config['SESSION_COOKIE_SECURE']=os.getenv('APP_ENV')=='production'
+group_planning_defaults = GroupPlanningLimits()
+app.config.from_mapping(
+    GROUP_PLANNING_MAX_RETAILERS=os.getenv(
+        'GROUP_PLANNING_MAX_RETAILERS', group_planning_defaults.max_retailers_per_bucket,
+    ),
+    GROUP_PLANNING_MAX_QUOTE_EVALUATIONS=os.getenv(
+        'GROUP_PLANNING_MAX_QUOTE_EVALUATIONS', group_planning_defaults.max_quote_evaluations,
+    ),
+    GROUP_PLANNING_MAX_SEARCH_NODES=os.getenv(
+        'GROUP_PLANNING_MAX_SEARCH_NODES', group_planning_defaults.max_search_nodes,
+    ),
+)
 logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
 
 
@@ -62,12 +75,24 @@ def all_offers():
     return query('''SELECT o.*,s.name AS supplier_name,s.service_area FROM supplier_offers o
         JOIN suppliers s ON s.id=o.supplier_id ORDER BY o.id''')
 
-def decision_results():
+def decision_results(*, optimised=False):
     orders = all_orders()
     offers = all_offers()
     tiers = query('SELECT * FROM price_tiers ORDER BY min_quantity_kg')
     allocations = query('SELECT offer_id, window_id, quantity_kg, status FROM allocations')
-    return evaluate_plan(orders, offers, tiers, allocations)
+    if not optimised:
+        batches, totals = evaluate_plan(orders, offers, tiers, allocations)
+        return batches, totals, {}
+
+    try:
+        limits = GroupPlanningLimits(
+            max_retailers_per_bucket=int(str(app.config['GROUP_PLANNING_MAX_RETAILERS'])),
+            max_quote_evaluations=int(str(app.config['GROUP_PLANNING_MAX_QUOTE_EVALUATIONS'])),
+            max_search_nodes=int(str(app.config['GROUP_PLANNING_MAX_SEARCH_NODES'])),
+        )
+    except ValueError:
+        raise ValueError('Retailer grouping limits must be nonnegative integers.') from None
+    return evaluate_optimised_plan(orders, offers, tiers, allocations, limits=limits)
 
 def dashboard_metrics():
     stats=query('''SELECT COUNT(*) AS order_count,COALESCE(SUM(CASE WHEN status='committed' THEN quantity_kg ELSE 0 END),0) AS committed_kg FROM demand_orders''')[0]
@@ -84,8 +109,8 @@ def dashboard_metrics():
 @app.get('/')
 @require_login
 def home():
-    batches, _ = decision_results()
-    return render_template('dashboard.html',batches=batches,metrics=dashboard_metrics())
+    batches, _, planning = decision_results(optimised=request.args.get('grouping') == 'optimised')
+    return render_template('dashboard.html', batches=batches, metrics=dashboard_metrics(), planning=planning)
 
 @app.get('/orders')
 @require_login
@@ -237,13 +262,16 @@ def api_create_offer():
 @app.get('/api/decisions')
 @require_login
 def api_decisions():
-    batches, proposed_totals = decision_results()
+    batches, proposed_totals, planning = decision_results(
+        optimised=request.args.get('grouping') == 'optimised',
+    )
     return jsonify(
         items=batches,
         proposed_reservation_totals=[
             {"offer_id": offer_id, "window_id": window_id, "quantity_kg": format(quantity, "f")}
             for (offer_id, window_id), quantity in sorted(proposed_totals.items())
         ],
+        **planning,
     )
 
 @app.get('/api/kpis')
