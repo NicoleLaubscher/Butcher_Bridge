@@ -61,15 +61,15 @@ See `/methodology` for explicit rules. Existing sample code's post-order functio
 
 ## Shared-capacity planning
 
-The optimiser takes batches of committed orders with the same order window, product/specification ID, needed date and delivery area. Each batch can use its individual procurement baseline or one eligible supplier offer with a strictly lower delivered cost. The objective is to minimise the sum of these costs across batches.
+The optimiser takes batches of committed orders with the same order window, product/specification ID, needed date and delivery area. Each batch can use its individual procurement baseline or an eligible supplier offer with a strictly lower delivered cost that can be shared within the retailer caps. The objective is to minimise the sum of these costs across batches.
 
 Capacity is shared by offer ID across all windows. Every MySQL allocation with status `reserved` is deducted, including reservations in the batch's own window and windows outside the current demand. Reservation records identify an offer and window, so their full quantities are deducted before the planner considers new proposals.
 
 If each batch's cheapest choice fits alongside the others, their sum gives the exact minimum. Otherwise the search counts combinations by multiplying the number of cheaper eligible offers plus one baseline choice for each batch. Conflicts above 100,000 combinations retain the baselines and return `REJECT_PLANNING_LIMIT` for batches that had cheaper eligible quotes.
 
-In `items`, a quote's `reserved_kg` and `available_kg` are offer totals across all windows before applying any proposals. `eligible` describes whether the quote satisfies this batch's requirements on its own. `reservation_key_status` is `free`, `reserved` or `released` for the quote's offer and batch window. Both allocation statuses occupy the unique key, so only independently eligible quotes with a free key can be proposed for a new reservation.
+In `items`, a quote's `reserved_kg` and `available_kg` are offer totals across all windows before applying any proposals. `eligible` describes the standalone supplier checks for capacity, service area, lead time, fill rate and price tier. `reservation_key_status` is `free`, `reserved` or `released` for the quote's offer and batch window. Both allocation statuses occupy the unique key, so only independently eligible quotes with a free key can be proposed for a new reservation.
 
-`proposed_offer_id` identifies the supplier selected by the joint plan, or is `null` for baseline procurement. `recommended_savings_pct` compares the plan choice with the baseline and is zero when the batch keeps its baseline. `savings_pct` and `allocated_costs` describe the displayed quotation and its proportional cost shares.
+`proposed_offer_id` identifies the supplier selected by the joint plan, or is `null` for baseline procurement. `recommended_savings_pct` compares the plan choice with the baseline and is zero when the batch keeps its baseline. `savings_pct` describes the displayed quotation for comparison.
 
 `proposed_reservation_totals` is an array sorted by offer ID and window ID. It contains one entry per selected pair with `quantity_kg` as an exact decimal string without rounding or exponent notation. The total combines selected batch quantities for capacity only. Each batch retains its own price tier and delivery cost. An empty array means the plan made no new capacity proposals.
 
@@ -78,6 +78,16 @@ In `items`, a quote's `reserved_kg` and `available_kg` are offer totals across a
 ```
 
 Free keys and proposed totals reflect the data read during evaluation. Existing holds require review because the schema records them at offer and window level. Duplicate allocation keys or unrecognised statuses return HTTP 400 with an explanation. Capacity reservations are recorded through a separate `POST /api/allocations` request that checks current capacity before writing.
+
+## Proposed retailer costs
+
+For each batch, the evaluator sums each retailer's order baselines (`kg × baseline price per kg + baseline logistics`) using `Decimal` and rounds the retailer's total down once to whole cents. That amount is the retailer's cap. A quote enters the joint planner only if it costs less than the combined unrounded baseline and its rounded total fits within the sum of the caps. Quotes that beat the raw baseline but exceed the caps carry a `cost_sharing_reason`. If none of the otherwise feasible supplier options can be shared within the caps at a saving, the batch keeps its baseline.
+
+The selected quote is apportioned in proportion to the retailer caps, giving the same percentage saving against each positive cap before cent rounding. After assigning the whole-cent part of each share, any remaining cents go to the largest fractional remainders, with lower retailer IDs breaking ties. The charges sum to the exact quote and stay within the caps. A zero cap gets a zero charge. When all caps are zero, only a zero-cost quote can be fully allocated, and it still has to beat the combined unrounded baseline. Share sizes depend on reliable baseline evidence. For a fixed quote, understating a baseline can reduce that retailer's charge and shift cost to others.
+
+Each decision item includes `proposed_retailer_costs` with one row per retailer ID for a selected proposal. The rows contain `retailer_id`, `retailer`, `baseline_cap`, `proposed_cost` and `orders`. The amounts are exact decimal strings with two fractional digits. Each `orders` entry has an `order_id` and its exact `proposed_cost`. A retailer's charge is apportioned to its orders by kg, with lower order IDs breaking rounding ties. The cap applies to the retailer total for the batch. The array is empty when the batch keeps its baseline.
+
+`allocated_costs` retains the numeric per-order response fields. Its values reflect the retailer cost split for proposals. When a rejected quotation is retained for comparison, the field gives a diagnostic split by kg. Use the decimal strings in `proposed_retailer_costs` for exact cent reconciliation. The dashboard shows these proposed amounts as estimates.
 
 ## Reset, backup, collaboration and limitations
 

@@ -23,10 +23,20 @@
       <td>{{v.supplier}}{% if b.proposed_offer_id == v.offer_id %} <span class="tag success">Proposed purchase</span>{% endif %}</td>
       <td>{{v.reserved_kg}}</td><td>{{v.available_kg}}</td><td>{{v.tier_min_kg or '—'}}</td>
       <td>{{'R%.2f'|format(v.total_cost) if v.total_cost is not none else '—'}}</td><td>{{'R%.2f'|format(v.cost_per_kg) if v.cost_per_kg is not none else '—'}}</td>
-      <td>{{'Eligible for this batch' if v.eligible else v.reasons|join('; ')}}</td>
+      <td>
+        {{'Eligible for this batch' if v.eligible else v.reasons|join('; ')}}
+        {% if v.cost_sharing_reason %}<br><span class="muted">{{v.cost_sharing_reason}}</span>{% endif %}
+      </td>
       <td>{% if v.reservation_key_status == 'free' %}Free{% elif v.reservation_key_status %}Occupied ({{v.reservation_key_status}}){% else %}Unknown{% endif %}</td>
     </tr>
   {% endfor %}</tbody>
 </table></div>
-{% if b.proposed_offer_id is not none and b.allocated_costs %}<p class="muted">Proposed cost by retailer, proportional to kg with a rounding adjustment on the final order.</p><ul>{% for a in b.allocated_costs %}<li>{{a.retailer}} R{{a.allocated_cost}}</li>{% endfor %}</ul>{% endif %}</section>{% endfor %}
+{% if b.proposed_retailer_costs %}
+<div class="scroll"><table><caption>Proposed retailer costs</caption>
+  <thead><tr><th scope="col">Retailer</th><th scope="col">Baseline cap</th><th scope="col">Proposed charge</th></tr></thead>
+  <tbody>{% for share in b.proposed_retailer_costs %}
+    <tr><th scope="row">{{share.retailer}}</th><td>R{{share.baseline_cap}}</td><td>R{{share.proposed_cost}}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% endif %}</section>{% endfor %}
 {% endblock %}
