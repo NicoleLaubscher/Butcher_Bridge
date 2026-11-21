@@ -8,7 +8,7 @@ from flask import Flask, jsonify, render_template, request, session, redirect, u
 from dotenv import load_dotenv
 from pymysql.err import IntegrityError
 from db import query, transaction
-from decision_engine import evaluate
+from decision_engine import evaluate_plan
 
 load_dotenv(override=True)
 app=Flask(__name__)
@@ -63,11 +63,11 @@ def all_offers():
         JOIN suppliers s ON s.id=o.supplier_id ORDER BY o.id''')
 
 def decision_results():
-    orders=all_orders(); offers=all_offers()
-    tiers=query('SELECT * FROM price_tiers ORDER BY min_quantity_kg')
-    allocations=query("SELECT offer_id,window_id,SUM(quantity_kg) AS reserved FROM allocations WHERE status='reserved' GROUP BY offer_id,window_id")
-    reserved={(a['offer_id'],a['window_id']):a['reserved'] for a in allocations}
-    return evaluate(orders,offers,tiers,reserved=reserved)
+    orders = all_orders()
+    offers = all_offers()
+    tiers = query('SELECT * FROM price_tiers ORDER BY min_quantity_kg')
+    allocations = query('SELECT offer_id, window_id, quantity_kg, status FROM allocations')
+    return evaluate_plan(orders, offers, tiers, allocations)
 
 def dashboard_metrics():
     stats=query('''SELECT COUNT(*) AS order_count,COALESCE(SUM(CASE WHEN status='committed' THEN quantity_kg ELSE 0 END),0) AS committed_kg FROM demand_orders''')[0]
@@ -84,7 +84,8 @@ def dashboard_metrics():
 @app.get('/')
 @require_login
 def home():
-    return render_template('dashboard.html',batches=decision_results(),metrics=dashboard_metrics())
+    batches, _ = decision_results()
+    return render_template('dashboard.html',batches=batches,metrics=dashboard_metrics())
 
 @app.get('/orders')
 @require_login
@@ -235,7 +236,15 @@ def api_create_offer():
 
 @app.get('/api/decisions')
 @require_login
-def api_decisions(): return jsonify(items=decision_results())
+def api_decisions():
+    batches, proposed_totals = decision_results()
+    return jsonify(
+        items=batches,
+        proposed_reservation_totals=[
+            {"offer_id": offer_id, "window_id": window_id, "quantity_kg": format(quantity, "f")}
+            for (offer_id, window_id), quantity in sorted(proposed_totals.items())
+        ],
+    )
 
 @app.get('/api/kpis')
 @require_login
