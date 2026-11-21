@@ -39,3 +39,24 @@ def query(sql, params=()):
         with conn.cursor() as cur:
             cur.execute(sql, params)
             return cur.fetchall()
+
+
+@contextmanager
+def read_snapshot():
+    """Materialise consistent InnoDB reads without opening a write transaction."""
+    conn = connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            cur.execute("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY")
+
+            def read(sql):
+                cur.execute(sql)
+                return tuple(cur.fetchall())
+
+            yield read
+    finally:
+        try:
+            conn.rollback()
+        finally:
+            conn.close()

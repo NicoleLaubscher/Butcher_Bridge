@@ -7,8 +7,8 @@ from functools import wraps
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from dotenv import load_dotenv
 from pymysql.err import IntegrityError
-from db import query, transaction
-from decision_engine import evaluate_optimised_plan, evaluate_plan
+from db import query, read_snapshot, transaction
+from decision_engine import compare_plans, evaluate_optimised_plan, evaluate_plan
 from group_formation_planner import GroupPlanningLimits
 
 load_dotenv(override=True)
@@ -30,6 +30,14 @@ app.config.from_mapping(
     ),
 )
 logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
+
+ORDER_DETAILS = '''SELECT d.*,r.name AS retailer_name,p.name AS product_name,p.specification,
+        w.label AS window_label FROM demand_orders d JOIN retailers r ON r.id=d.retailer_id
+        JOIN products p ON p.id=d.product_id JOIN order_windows w ON w.id=d.window_id'''
+OFFER_DETAILS = '''SELECT o.*,s.name AS supplier_name,s.service_area FROM supplier_offers o
+        JOIN suppliers s ON s.id=o.supplier_id ORDER BY o.id'''
+PRICE_TIERS = 'SELECT * FROM price_tiers ORDER BY min_quantity_kg'
+ALLOCATIONS = 'SELECT offer_id, window_id, quantity_kg, status FROM allocations'
 
 
 def require_login(fn):
@@ -67,36 +75,51 @@ def lookup_data():
             'suppliers':query('SELECT id,name,service_area FROM suppliers ORDER BY name')}
 
 def all_orders():
-    return query('''SELECT d.*,r.name AS retailer_name,p.name AS product_name,p.specification,
-        w.label AS window_label FROM demand_orders d JOIN retailers r ON r.id=d.retailer_id
-        JOIN products p ON p.id=d.product_id JOIN order_windows w ON w.id=d.window_id ORDER BY d.id DESC''')
+    return query(ORDER_DETAILS + ' ORDER BY d.id DESC')
 
 def all_offers():
-    return query('''SELECT o.*,s.name AS supplier_name,s.service_area FROM supplier_offers o
-        JOIN suppliers s ON s.id=o.supplier_id ORDER BY o.id''')
+    return query(OFFER_DETAILS)
 
 def decision_results(*, optimised=False):
     orders = all_orders()
     offers = all_offers()
-    tiers = query('SELECT * FROM price_tiers ORDER BY min_quantity_kg')
-    allocations = query('SELECT offer_id, window_id, quantity_kg, status FROM allocations')
+    tiers = query(PRICE_TIERS)
+    allocations = query(ALLOCATIONS)
     if not optimised:
         batches, totals = evaluate_plan(orders, offers, tiers, allocations)
         return batches, totals, {}
 
+    return evaluate_optimised_plan(orders, offers, tiers, allocations, limits=group_planning_limits())
+
+
+def group_planning_limits():
     try:
-        limits = GroupPlanningLimits(
+        return GroupPlanningLimits(
             max_retailers_per_bucket=int(str(app.config['GROUP_PLANNING_MAX_RETAILERS'])),
             max_quote_evaluations=int(str(app.config['GROUP_PLANNING_MAX_QUOTE_EVALUATIONS'])),
             max_search_nodes=int(str(app.config['GROUP_PLANNING_MAX_SEARCH_NODES'])),
         )
     except ValueError:
         raise ValueError('Retailer grouping limits must be nonnegative integers.') from None
-    return evaluate_optimised_plan(orders, offers, tiers, allocations, limits=limits)
 
-def dashboard_metrics():
-    stats=query('''SELECT COUNT(*) AS order_count,COALESCE(SUM(CASE WHEN status='committed' THEN quantity_kg ELSE 0 END),0) AS committed_kg FROM demand_orders''')[0]
-    fulfil=query('''SELECT COUNT(*) AS n, COALESCE(SUM(f.delivered_kg),0) AS delivered,COALESCE(SUM(o.quantity_kg),0) AS ordered,
+
+def comparison_results(*, include_metrics=False):
+    as_of = date.today()
+    limits = group_planning_limits()
+    with read_snapshot() as read:
+        orders = read(ORDER_DETAILS + " WHERE d.status='committed' ORDER BY d.id DESC")
+        offers = read(OFFER_DETAILS)
+        tiers = read(PRICE_TIERS)
+        allocations = read(ALLOCATIONS)
+        metrics = dashboard_metrics(read) if include_metrics else None
+    summary, plans = compare_plans(orders, offers, tiers, allocations, as_of=as_of, limits=limits)
+    return summary, plans, metrics
+
+
+def dashboard_metrics(read=None):
+    read = query if read is None else read
+    stats=read('''SELECT COUNT(*) AS order_count,COALESCE(SUM(CASE WHEN status='committed' THEN quantity_kg ELSE 0 END),0) AS committed_kg FROM demand_orders''')[0]
+    fulfil=read('''SELECT COUNT(*) AS n, COALESCE(SUM(f.delivered_kg),0) AS delivered,COALESCE(SUM(o.quantity_kg),0) AS ordered,
        COALESCE(SUM(CASE WHEN f.actual_days<=f.planned_days THEN 1 ELSE 0 END),0) AS on_time,
        COALESCE(SUM(CASE WHEN f.actual_days<=f.planned_days AND f.delivered_kg>=o.quantity_kg THEN 1 ELSE 0 END),0) AS otif
        FROM fulfilments f JOIN demand_orders o ON o.id=f.demand_order_id''')[0]
@@ -106,11 +129,22 @@ def dashboard_metrics():
             'on_time_pct':round(int(fulfil['on_time'])/n*100,1) if n else None,
             'otif_pct':round(int(fulfil['otif'])/n*100,1) if n else None}
 
+
+@app.template_filter('rand_amount')
+def rand_amount(value):
+    amount = Decimal(value)
+    sign = '-' if amount < 0 else ''
+    whole, _, fraction = format(abs(amount), ',f').partition('.')
+    return f"{sign}R{whole}.{fraction.rstrip('0').ljust(2, '0')}"
+
+
 @app.get('/')
 @require_login
 def home():
-    batches, _, planning = decision_results(optimised=request.args.get('grouping') == 'optimised')
-    return render_template('dashboard.html', batches=batches, metrics=dashboard_metrics(), planning=planning)
+    mode = 'optimised' if request.args.get('grouping') == 'optimised' else 'fixed'
+    comparison, plans, metrics = comparison_results(include_metrics=True)
+    return render_template('dashboard.html', batches=plans[mode], metrics=metrics,
+                           comparison=comparison, mode=mode)
 
 @app.get('/orders')
 @require_login
@@ -273,6 +307,13 @@ def api_decisions():
         ],
         **planning,
     )
+
+@app.get('/api/decisions/comparison')
+@require_login
+def api_decision_comparison():
+    summary, _, _ = comparison_results()
+    return jsonify(summary)
+
 
 @app.get('/api/kpis')
 @require_login

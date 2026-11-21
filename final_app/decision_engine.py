@@ -28,6 +28,13 @@ def money(value):
     return float(_round_money(value))
 
 
+def _order_baseline(order):
+    return (
+        D(order["quantity_kg"]) * D(order["baseline_price_per_kg"])
+        + D(order["baseline_logistics_cost"])
+    )
+
+
 def validate_order(order):
     """Reject invalid committed demand before procurement evaluation."""
     order_id = order.get("id", "unknown")
@@ -228,48 +235,134 @@ def _allocation_state(allocations):
     return reserved, allocation_statuses
 
 
-def evaluate_plan(orders, offers, tiers, allocations, min_fill=0.95, as_of=None):
+def evaluate_plan(orders, offers, tiers, allocations, min_fill=0.95, as_of=None, *,
+                  comparison_details=False):
     """Return fixed-batch decisions and Decimal proposal totals for fresh keys."""
     reserved, allocation_statuses = _allocation_state(allocations)
     return _evaluate(
         orders, offers, tiers, reserved, min_fill, as_of,
-        allocation_statuses=allocation_statuses,
+        allocation_statuses=allocation_statuses, comparison_details=comparison_details,
     )
 
 
 def evaluate_optimised_plan(orders, offers, tiers, allocations, min_fill=0.95,
-                            as_of=None, *, limits=GroupPlanningLimits()):
+                            as_of=None, *, limits=GroupPlanningLimits(),
+                            comparison_details=False):
     """Return an exact retailer-group plan or a separately evaluated fixed plan."""
     orders, offers, tiers, allocations = map(tuple, (orders, offers, tiers, allocations))
     as_of = as_of or date.today()
     groups = _group_orders(orders)
-    order_ids = [order.get("id") for group in groups.values() for order in group]
-    if any(order_id in (None, "") for order_id in order_ids):
-        raise ValueError("An order ID is required for each committed order.")
-    if len(set(order_ids)) != len(order_ids):
-        raise ValueError("Duplicate committed order IDs cannot be planned.")
+    order_ids = _committed_order_ids(orders)
 
     reserved, statuses = _allocation_state(allocations)
     evaluator = _QuoteEvaluator(offers, tiers, reserved, min_fill, as_of, statuses)
     try:
         batches, plan = _optimised_groups(groups, evaluator, limits)
     except GroupPlanningLimit as limit:
-        items, totals = evaluate_plan(orders, offers, tiers, allocations, min_fill, as_of)
-        for item in items:
-            key = (item["window_id"], item["product_id"], item["needed_date"], item["area"])
-            item.update(_group_details(key, groups[key], item["proposed_offer_id"]))
+        items, totals = evaluate_plan(
+            orders, offers, tiers, allocations, min_fill, as_of,
+            comparison_details=comparison_details,
+        )
+        if not comparison_details:
+            for item in items:
+                key = (item["window_id"], item["product_id"], item["needed_date"], item["area"])
+                item.update(_group_details(key, groups[key], item["proposed_offer_id"]))
         reason = str(limit)
         if any(item["decision"] == "REJECT_PLANNING_LIMIT" for item in items):
             reason += " The fixed-batch planner also reached its limit and kept the baselines."
         planning = {"planning_status": "fallback", "fallback_reason": reason}
     else:
-        items, totals = _render_plan(batches, plan, optimised=True)
+        items, totals = _render_plan(
+            batches, plan, optimised=True, comparison_details=comparison_details,
+        )
         planning = {"planning_status": "exact", "fallback_reason": None}
 
-    covered = [order_id for item in items for order_id in item["order_ids"]]
-    if len(covered) != len(order_ids) or set(covered) != set(order_ids):
-        raise RuntimeError("The plan did not cover each committed order exactly once.")
+    _verify_order_coverage(items, order_ids)
     return items, totals, planning
+
+
+def _committed_order_ids(orders):
+    order_ids = set()
+    for order in orders:
+        if order["status"] != "committed":
+            continue
+        order_id = order.get("id")
+        if order_id in (None, ""):
+            raise ValueError("An order ID is required for each committed order.")
+        if order_id in order_ids:
+            raise ValueError("Duplicate committed order IDs cannot be planned.")
+        order_ids.add(order_id)
+    return order_ids
+
+
+def _verify_order_coverage(items, order_ids):
+    covered = [order_id for item in items for order_id in item["order_ids"]]
+    if len(covered) != len(order_ids) or set(covered) != order_ids:
+        raise RuntimeError("The plan did not cover each committed order exactly once.")
+
+
+def _savings_percentage(savings, denominator):
+    if not denominator:
+        return None
+    return format(_round_money(savings * 100 / denominator), "f")
+
+
+def _plan_summary(baseline, total_cost, fallback_reason):
+    savings = baseline - total_cost
+    return {
+        "total_cost": format(total_cost, "f"),
+        "savings_vs_baseline": format(savings, "f"),
+        "savings_pct_of_baseline": _savings_percentage(savings, baseline),
+        "planning_status": "fallback" if fallback_reason is not None else "exact",
+        "fallback_reason": fallback_reason,
+    }
+
+
+def _supplier_assignments(items):
+    return {
+        (item["proposed_offer_id"], tuple(item["order_ids"]))
+        for item in items if item["proposed_offer_id"] is not None
+    }
+
+
+def compare_plans(orders, offers, tiers, allocations, min_fill=0.95, as_of=None, *,
+                  limits=GroupPlanningLimits()):
+    """Compare both plans on one snapshot, including exact costs and membership."""
+    orders, offers, tiers, allocations = map(tuple, (orders, offers, tiers, allocations))
+    as_of = as_of or date.today()
+    order_ids = _committed_order_ids(orders)
+    fixed, _ = evaluate_plan(
+        orders, offers, tiers, allocations, min_fill, as_of=as_of, comparison_details=True,
+    )
+    optimised, _, planning = evaluate_optimised_plan(
+        orders, offers, tiers, allocations, min_fill, as_of=as_of, limits=limits,
+        comparison_details=True,
+    )
+    _verify_order_coverage(fixed, order_ids)
+    _verify_order_coverage(optimised, order_ids)
+    baseline = sum((_order_baseline(o) for o in orders if o["status"] == "committed"), Decimal(0))
+    fixed_cost = sum((item["planned_cost"] for item in fixed), Decimal(0))
+    optimised_cost = sum((item["planned_cost"] for item in optimised), Decimal(0))
+    fixed_fallback = next(
+        (item["reason"] for item in fixed if item["decision"] == "REJECT_PLANNING_LIMIT"), None,
+    )
+    incremental = fixed_cost - optimised_cost
+    summary = {
+        "evaluated_on": as_of.isoformat(),
+        "committed_order_count": len(order_ids),
+        "baseline_total": format(baseline, "f"),
+        "fixed": _plan_summary(baseline, fixed_cost, fixed_fallback),
+        "optimised": _plan_summary(baseline, optimised_cost, planning["fallback_reason"]),
+        "incremental": {
+            "savings_vs_fixed": format(incremental, "f"),
+            "savings_pct_of_fixed": _savings_percentage(incremental, fixed_cost),
+        },
+        "same_cost": fixed_cost == optimised_cost,
+        # With identical order coverage, unchanged supplier assignments imply
+        # unchanged individual baselines even if their displayed rows differ.
+        "same_assignments": _supplier_assignments(fixed) == _supplier_assignments(optimised),
+    }
+    return summary, {"fixed": fixed, "optimised": optimised}
 
 
 def _group_orders(orders):
@@ -330,10 +423,7 @@ class _QuoteEvaluator:
 
         retailer_baselines = defaultdict(Decimal)
         for order in batch:
-            retailer_baselines[order["retailer_id"]] += (
-                D(order["quantity_kg"]) * D(order["baseline_price_per_kg"])
-                + D(order["baseline_logistics_cost"])
-            )
+            retailer_baselines[order["retailer_id"]] += _order_baseline(order)
         baseline = sum(retailer_baselines.values())
         retailer_caps = {
             retailer_id: int(amount.scaleb(2).to_integral_value(rounding=ROUND_FLOOR))
@@ -506,16 +596,34 @@ def _group_details(key, orders, proposed_offer_id):
     }
 
 
-def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_statuses=None):
+def _retailer_memberships(orders):
+    members = {}
+    for order in sorted(orders, key=lambda row: (row["retailer_id"], row["id"])):
+        retailer_id = order["retailer_id"]
+        if retailer_id not in members:
+            members[retailer_id] = {
+                "retailer_id": retailer_id,
+                "name": order["retailer_name"],
+                "order_ids": [],
+                "baseline": Decimal(0),
+            }
+        member = members[retailer_id]
+        member["order_ids"].append(order["id"])
+        member["baseline"] += _order_baseline(order)
+    return list(members.values())
+
+
+def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_statuses=None,
+              comparison_details=False):
     evaluator = _QuoteEvaluator(offers, tiers, reserved or {}, min_fill, as_of, allocation_statuses)
     groups = _group_orders(orders)
     batches = [evaluator.quote(key, group) for key, group in sorted(groups.items())]
     plan = plan_offers([(batch.quantity, batch.savings) for batch in batches],
                        evaluator.available_by_offer)
-    return _render_plan(batches, plan)
+    return _render_plan(batches, plan, comparison_details=comparison_details)
 
 
-def _render_plan(batches, plan, *, optimised=False):
+def _render_plan(batches, plan, *, optimised=False, comparison_details=False):
     outputs = []
     proposed_totals = defaultdict(Decimal)
     for index, quoted in enumerate(batches):
@@ -668,8 +776,11 @@ def _render_plan(batches, plan, *, optimised=False):
                 else "mixed_or_simulated"
             ),
         }
-        if optimised:
+        if optimised or comparison_details:
             row.update(_group_details(quoted.key, batch, proposed_offer_id))
+        if comparison_details:
+            row["planned_cost"] = group_cost if proposed_offer_id is not None else baseline
+            row["retailers"] = _retailer_memberships(batch)
         outputs.append(row)
 
     return outputs, dict(proposed_totals)
