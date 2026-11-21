@@ -42,7 +42,7 @@ In `.env`: set the *same* shared DB_HOST/DB_PORT/DB_NAME for all teammates; DB_U
 | PATCH | `/api/orders/1` | Update before window closes |
 | GET | `/api/offers` | List offers |
 | POST | `/api/offers` | Create offer and tiers |
-| GET | `/api/decisions` | Baseline, feasibility, accept/reject, allocations |
+| GET | `/api/decisions` | Batch recommendations and quote comparisons. `proposed_offer_id` is the proposed offer or `null` for baseline procurement. |
 | GET | `/api/kpis` | Real DB KPI counts and actual fulfilment statistics |
 | POST | `/api/allocations` | Reserve supplier capacity transactionally |
 | POST | `/api/fulfilments` | Record completed order and update its status |
@@ -58,6 +58,16 @@ POST /api/offers JSON:
 ```
 
 See `/methodology` for explicit rules. Existing sample code's post-order functions remain in the original repository and are not deleted.
+
+## Shared-capacity planning
+
+The optimiser takes batches of committed orders with the same order window, product/specification ID, needed date and delivery area. Each batch can use its individual procurement baseline or one eligible supplier offer with a strictly lower delivered cost. The objective is to minimise the sum of these costs across batches.
+
+Capacity is shared by offer ID across all windows. Every MySQL allocation with status `reserved` is deducted, including reservations in the batch's own window and windows outside the current demand. Reservation records identify an offer and window, so their full quantities are deducted before the planner considers new proposals.
+
+If each batch's cheapest choice fits alongside the others, their sum gives the exact minimum. Otherwise the search counts combinations by multiplying the number of cheaper eligible offers plus one baseline choice for each batch. Conflicts above 100,000 combinations retain the baselines and return `REJECT_PLANNING_LIMIT` for batches that had cheaper eligible quotes.
+
+`proposed_offer_id` identifies a supplier proposal. `recommended_savings_pct` compares the plan choice with the baseline and is zero when the batch keeps its baseline. `savings_pct` and `allocated_costs` describe the displayed quotation and its proportional cost shares. Capacity reservations are recorded through a separate `POST /api/allocations` request that checks current capacity before writing.
 
 ## Reset, backup, collaboration and limitations
 

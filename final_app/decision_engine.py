@@ -5,13 +5,22 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
+if __package__:
+    from .joint_capacity_planner import plan_offers
+else:
+    from joint_capacity_planner import plan_offers
+
 
 def D(value):
     return Decimal(str(value))
 
 
+def _round_money(value):
+    return D(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def money(value):
-    return float(D(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    return float(_round_money(value))
 
 
 def validate_order(order):
@@ -136,11 +145,21 @@ def validate_supplier_inputs(offers, tiers, reserved, min_fill):
 
 
 def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
-    """Evaluate pre-formed compatible batches; not global optimisation."""
+    """Propose capacity-feasible procurement for pre-formed compatible batches."""
     as_of = as_of or date.today()
     reserved = reserved or {}
 
     validate_supplier_inputs(offers, tiers, reserved, min_fill)
+
+    reserved_by_offer = defaultdict(Decimal)
+    for (offer_id, _window_id), quantity in reserved.items():
+        reserved_by_offer[offer_id] += D(quantity)
+
+    offers = sorted(offers, key=lambda offer: offer["id"])
+    available_by_offer = {
+        offer["id"]: D(offer["capacity_kg"]) - reserved_by_offer[offer["id"]]
+        for offer in offers
+    }
 
     groups = defaultdict(list)
 
@@ -159,10 +178,12 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
 
         groups[key].append(o)
 
-    outputs = []
+    batches = []
+    planner_inputs = []
 
-    for (window, product, need, area), batch in groups.items():
-
+    for key, batch in sorted(groups.items()):
+        _, product, need, area = key
+        batch = sorted(batch, key=lambda order: order["id"], reverse=True)
         q = sum(D(o["quantity_kg"]) for o in batch)
 
         baseline = sum(
@@ -171,10 +192,7 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
             for o in batch
         )
 
-        base_trips = sum(int(o["baseline_trips"]) for o in batch)
-        base_distance = sum(D(o["baseline_distance_km"]) for o in batch)
-
-        ranked = []
+        quotes = {}
 
         for offer in offers:
             if offer["product_id"] != product or not offer["active"]:
@@ -182,16 +200,7 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
 
             reasons = []
 
-            reserved_elsewhere = sum(
-                D(v)
-                for (offer_id, reserved_window), v in reserved.items()
-                if (
-                    offer_id == offer["id"]
-                    and reserved_window != window
-                )
-            )
-
-            available = D(offer["capacity_kg"]) - reserved_elsewhere
+            available = available_by_offer[offer["id"]]
 
             if available < q:
                 reasons.append("Insufficient unreserved capacity")
@@ -240,13 +249,13 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
                     + D(offer["handling_cost"])
                 )
 
-            ranked.append({
+            quotes[offer["id"]] = {
                 "offer_id": offer["id"],
                 "supplier": offer["supplier_name"],
                 "eligible": not reasons,
                 "reasons": reasons,
                 "total_cost": (
-                    money(total) if total is not None else None
+                    _round_money(total) if total is not None else None
                 ),
                 "cost_per_kg": (
                     money(total / q) if total is not None else None
@@ -258,69 +267,96 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
                 "available_kg": float(available),
                 "delivery_trips": int(offer["coordinated_trips"]),
                 "distance_km": float(offer["coordinated_distance_km"]),
-            })
+            }
 
-        feasible = [v for v in ranked if v["eligible"]]
+        savings = {
+            offer_id: baseline - quote["total_cost"]
+            for offer_id, quote in quotes.items()
+            if quote["eligible"] and quote["total_cost"] < baseline
+        }
+        batches.append((key, batch, baseline, quotes))
+        planner_inputs.append((q, savings))
 
-        winner = (
-            min(feasible, key=lambda x: x["total_cost"])
-            if feasible else None
-        )
+    plan = plan_offers(planner_inputs, available_by_offer)
+    outputs = []
+
+    for index, (key, batch, baseline, quotes) in enumerate(batches):
+        window, product, need, area = key
+        q, savings = planner_inputs[index]
+        proposed_offer_id = plan.get(index) if plan is not None else None
+        base_trips = sum(int(o["baseline_trips"]) for o in batch)
+        base_distance = sum(D(o["baseline_distance_km"]) for o in batch)
 
         retailer_count = len({
             o["retailer_id"] for o in batch
         })
 
-        if not winner:
-            decision = "REJECT_NO_FEASIBLE_SUPPLIER"
-            reason = (
-                "No eligible supplier satisfies the procurement "
-                "requirements. Retailers should retain their "
-                "existing procurement arrangements."
-            )
-
-        elif retailer_count == 1:
-            if D(winner["total_cost"]) < baseline:
+        if proposed_offer_id is not None:
+            best = quotes[proposed_offer_id]
+            if retailer_count == 1:
                 decision = "INDIVIDUAL_BETTER_QUOTE"
                 reason = (
-                    "Only one retailer is participating. A cheaper feasible "
-                    "supplier quotation is available. Recommend individual "
-                    "procurement from this supplier. This is not aggregation."
+                    "The lowest-cost joint plan proposes this supplier quote "
+                    "for the retailer's individual procurement."
                 )
             else:
+                decision = "ACCEPT"
+                reason = (
+                    "The lowest-cost joint plan proposes this supplier quote "
+                    "for multi-retailer aggregation."
+                )
+
+        elif savings:
+            best = None
+            if plan is None:
+                decision = "REJECT_PLANNING_LIMIT"
+                reason = (
+                    "This scenario exceeds the joint planning limit. Keep the "
+                    "individual procurement baseline."
+                )
+            else:
+                decision = "REJECT_NO_FEASIBLE_SUPPLIER"
+                reason = (
+                    "The lowest-cost joint plan uses shared capacity for "
+                    "other batches. Keep the individual procurement baseline."
+                )
+
+        else:
+            best = min(
+                (quote for quote in quotes.values() if quote["eligible"]),
+                key=lambda quote: quote["total_cost"],
+                default=None,
+            )
+            if best is None:
+                decision = "REJECT_NO_FEASIBLE_SUPPLIER"
+                reason = (
+                    "No eligible supplier satisfies the procurement "
+                    "requirements. Retailers should retain their "
+                    "existing procurement arrangements."
+                )
+            elif retailer_count == 1:
                 decision = "INDIVIDUAL_KEEP_BASELINE"
                 reason = (
                     "Only one retailer is participating. The retailer should "
                     "retain its existing procurement arrangement because it "
                     "is cheaper than or equal in cost to the alternative "
-                    "supplier quotation. This is not aggregation."
+                    "supplier quotation."
+                )
+            else:
+                decision = "REJECT_NOT_CHEAPER"
+                reason = (
+                    "Multi-retailer aggregation does not reduce total delivered "
+                    "procurement cost. Retailers should retain their existing "
+                    "procurement arrangements."
                 )
 
-        elif D(winner["total_cost"]) >= baseline:
-            decision = "REJECT_NOT_CHEAPER"
-            reason = (
-                "Multi-retailer aggregation does not reduce total delivered "
-                "procurement cost. Retailers should retain their existing "
-                "procurement arrangements."
-            )
-
-        else:
-            decision = "ACCEPT"
-            reason = (
-                "Genuine multi-retailer aggregation is feasible and lowers "
-                "total delivered procurement cost compared with existing "
-                "arrangements."
-            )
-
-        group_cost = D(winner["total_cost"]) if winner else None
+        group_cost = best["total_cost"] if best is not None else None
 
         allocated = []
 
-        if winner:
+        if best is not None:
             shares = [
-                D(str(money(
-                    group_cost * D(o["quantity_kg"]) / q
-                )))
+                _round_money(group_cost * D(o["quantity_kg"]) / q)
                 for o in batch[:-1]
             ]
 
@@ -341,18 +377,12 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
             else None
         )
 
-        recommended_savings_pct = (
-            money((baseline - group_cost) / baseline * 100)
-            if (
-                decision in (
-                    "ACCEPT",
-                    "INDIVIDUAL_BETTER_QUOTE",
-                )
-                and group_cost is not None
-                and baseline > 0
-            )
-            else 0.0
-        )
+        recommended_savings_pct = savings_pct if proposed_offer_id is not None else 0.0
+
+        # Keep public quote costs numeric while using Decimal for plan comparisons.
+        for quote in quotes.values():
+            if quote["total_cost"] is not None:
+                quote["total_cost"] = float(quote["total_cost"])
 
         outputs.append({
             "window_id": window,
@@ -366,8 +396,9 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
             "baseline_cost_per_kg": money(baseline / q),
             "baseline_trips": base_trips,
             "baseline_distance_km": float(base_distance),
-            "offers": ranked,
-            "best": winner,
+            "offers": list(quotes.values()),
+            "best": best,
+            "proposed_offer_id": proposed_offer_id,
             "decision": decision,
             "reason": reason,
             "savings_pct": savings_pct,
