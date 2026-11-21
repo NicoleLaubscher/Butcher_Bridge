@@ -1,6 +1,7 @@
 """Reservation planning and read-only Flask tests with simulated data."""
 
 import unittest
+from contextlib import nullcontext
 from datetime import date, timedelta
 from decimal import Decimal
 from secrets import token_hex
@@ -146,6 +147,9 @@ class TestDecisionRoutes(unittest.TestCase):
             bridge_app, "transaction", side_effect=AssertionError("Reservation write path invoked"),
         ))
         self.query = self.enterContext(patch.object(bridge_app, "query", side_effect=self.read_rows))
+        self.enterContext(patch.object(
+            bridge_app, "read_snapshot", side_effect=lambda: nullcontext(self.read_rows),
+        ))
         self.client = bridge_app.app.test_client()
         with self.client.session_transaction() as session:
             session["signed_in"] = True
@@ -205,6 +209,7 @@ class TestDecisionRoutes(unittest.TestCase):
         self.assertIn("Occupied (released)", html)
         self.assertIn("New reservation key", html)
         self.assertEqual(html.count("Proposed purchase</span>"), 2)
+        self.assertIn("Single-retailer supplier purchase", html)
         self.assertIn("Potential savings vs baseline</span><strong>0.0%", html)
         self.assertIn("Potential savings vs baseline</span><strong>6.38%", html)
         self.assertIn("Actual fill rate", html)
@@ -255,8 +260,10 @@ class TestDecisionRoutes(unittest.TestCase):
         self.assertEqual(html.count('<th scope="row">R10</th>'), 1)
         self.assertIn("R6392.11", html)
         self.assertIn("R10957.89", html)
+        proposed_table = html.split("<caption>Proposed retailer costs</caption>", 1)[1].split("</table>", 1)[0]
         for retailer in ("R30", "R40", "R50"):
-            self.assertNotIn(f">{retailer}<", html)
+            self.assertIn(f"<strong>{retailer}</strong>", html)
+            self.assertNotIn(f">{retailer}<", proposed_table)
 
     def test_get_decisions_returns_empty_totals_without_committed_demand(self):
         self.orders = []
@@ -284,7 +291,7 @@ class TestDecisionRoutes(unittest.TestCase):
             default = self.client.get("/api/decisions")
             self.assertEqual(default.status_code, 200)
             self.assertEqual(self.client.get("/api/decisions?grouping=other").get_json(), default.get_json())
-            fixed_page = self.client.get("/")
+        fixed_page = self.client.get("/")
         fixed = default.get_json()
         self.assertEqual(set(fixed), {"items", "proposed_reservation_totals"})
         self.assertEqual(len(fixed["items"]), 1)
@@ -311,9 +318,10 @@ class TestDecisionRoutes(unittest.TestCase):
         dashboard = self.client.get("/?grouping=optimised")
         self.assertEqual(dashboard.status_code, 200)
         html = dashboard.get_data(as_text=True)
-        self.assertIn("Exact plan within the model constraints.", html)
-        self.assertIn("Retailer IDs 1, 2 · Order IDs 1, 2", html)
-        self.assertIn("Baseline procurement", html)
+        self.assertEqual(html.count(">Exact within the model<"), 2)
+        self.assertIn('<strong>R1</strong> <span class="muted">· Order IDs 1', html)
+        self.assertIn('<strong>R2</strong> <span class="muted">· Order IDs 2', html)
+        self.assertIn("Individual baseline procurement", html)
         self.assertEqual(html.count("<caption>Proposed retailer costs</caption>"), 1)
 
     def test_dashboard_and_api_report_configured_limit_fallback(self):
@@ -332,7 +340,7 @@ class TestDecisionRoutes(unittest.TestCase):
         html = dashboard.get_data(as_text=True)
         self.assertIn("Fixed-batch fallback.", html)
         self.assertIn("retailer bundle limit of 0", html)
-        self.assertNotIn("Exact plan within the model constraints.", html)
+        self.assertEqual(html.count(">Exact within the model<"), 1)
 
     def test_get_decisions_fails_safely_for_ambiguous_allocation_rows(self):
         reserved = allocation(1, 1, "100.00", "reserved")
