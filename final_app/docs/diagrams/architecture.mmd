@@ -1,0 +1,35 @@
+flowchart LR
+    subgraph Client["Browser"]
+        UI["Jinja-rendered dashboard and forms"]
+        JS["Form JavaScript and session cookie"]
+    end
+    subgraph Flask["Flask application"]
+        Routes["Session checks and page/JSON routes"]
+        Reads["Read queries<br/>Dashboard and comparison use one snapshot"]
+        Writes["Transactional writes<br/>Locks and server validation"]
+        KPIs["Recorded fulfilment KPI queries"]
+    end
+    subgraph Model["In-memory procurement model"]
+        Eval["Eligibility, tiers, delivered costs,<br/>reservation checks and fairness"]
+        Fixed["Fixed-batch joint-capacity planner"]
+        Groups["Bounded retailer-group optimiser"]
+        Compare["Exact cost comparison and status<br/>with safe fallbacks"]
+    end
+    Store[("MySQL 8 / InnoDB<br/>Demand, catalog, offers, tiers,<br/>allocations and fulfilments")]
+    UI -- "Submit and reload" --> JS
+    JS <-- "HTTP and JSON" --> Routes
+    Routes -- "Jinja response" --> UI
+    Routes --> Reads
+    Routes --> Writes
+    Routes --> KPIs
+    Reads <-- "SQL reads and results" --> Store
+    Writes <-- "Order, offer, reservation and fulfilment transactions" --> Store
+    KPIs <-- "Orders joined to fulfilments" --> Store
+    KPIs --> Routes
+    Reads -- "Orders, offers, tiers, holds" --> Eval
+    Eval --> Fixed
+    Eval --> Groups
+    Groups -. "Planning limit" .-> Fixed
+    Fixed --> Compare
+    Groups --> Compare
+    Compare -- "Response data only" --> Routes
