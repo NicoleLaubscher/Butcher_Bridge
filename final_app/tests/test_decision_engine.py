@@ -84,6 +84,10 @@ def tiers(offer_id=1, price=82):
 
 class TestDecisions(unittest.TestCase):
 
+    # ---------------------------------------------------------
+    # 1. Successful multi-retailer aggregation
+    # ---------------------------------------------------------
+
     def test_group_saves(self):
         """Three retailers aggregate and reduce delivered cost."""
 
@@ -126,6 +130,10 @@ class TestDecisions(unittest.TestCase):
             42250,
         )
 
+    # ---------------------------------------------------------
+    # 2. Individual retailer retains existing procurement
+    # ---------------------------------------------------------
+
     def test_individual_keep_baseline(self):
         """One retailer retains its cheaper existing arrangement."""
 
@@ -152,6 +160,10 @@ class TestDecisions(unittest.TestCase):
             result["recommended_savings_pct"], 0
         )
 
+    # ---------------------------------------------------------
+    # 3. Individual retailer receives cheaper supplier quote
+    # ---------------------------------------------------------
+
     def test_individual_better_quote(self):
         """One retailer receives a cheaper feasible quotation."""
 
@@ -173,6 +185,10 @@ class TestDecisions(unittest.TestCase):
 
         self.assertEqual(result["retailer_count"], 1)
 
+    # ---------------------------------------------------------
+    # 4. Multiple orders from one retailer
+    # ---------------------------------------------------------
+
     def test_multiple_orders_same_retailer(self):
         """Two orders from one retailer are not aggregation."""
 
@@ -193,6 +209,10 @@ class TestDecisions(unittest.TestCase):
             result["decision"],
             "INDIVIDUAL_BETTER_QUOTE",
         )
+
+    # ---------------------------------------------------------
+    # 5. Reject unprofitable multi-retailer aggregation
+    # ---------------------------------------------------------
 
     def test_no_savings_rejected(self):
         """Multi-retailer aggregation is rejected when more costly."""
@@ -218,24 +238,30 @@ class TestDecisions(unittest.TestCase):
             result["recommended_savings_pct"], 0
         )
 
+    # ---------------------------------------------------------
+    # 6. Reject aggregation with no cost advantage
+    # ---------------------------------------------------------
+
     def test_equal_cost_rejected(self):
         """Equal-cost aggregation is not a genuine saving."""
 
-        # Two orders of 100 kg each.
-        # Supplier total = 200*82 + 600 + 200 + 150
-        #                = R17,350
-        # Baseline = 200*83.75 + 2*300
-        #          = R17,350
+        # Supplier:
+        # 200*82 + 600 + 200 + 150 = R17,350
+        #
+        # Baseline:
+        # 200*83.75 + 2*300 = R17,350
 
         result = evaluate(
             [
                 order(
-                    1, 100,
+                    1,
+                    100,
                     baseline=83.75,
                     logistics=300,
                 ),
                 order(
-                    2, 100,
+                    2,
+                    100,
                     baseline=83.75,
                     logistics=300,
                 ),
@@ -262,6 +288,10 @@ class TestDecisions(unittest.TestCase):
             result["recommended_savings_pct"], 0
         )
 
+    # ---------------------------------------------------------
+    # 7. Supplier capacity and existing reservations
+    # ---------------------------------------------------------
+
     def test_capacity_conflict_rejected(self):
         """Supplier must have enough unreserved capacity."""
 
@@ -287,6 +317,10 @@ class TestDecisions(unittest.TestCase):
             result["offers"][0]["reasons"][0],
         )
 
+    # ---------------------------------------------------------
+    # 8. Exclude incompatible and withdrawn demand
+    # ---------------------------------------------------------
+
     def test_incompatible_and_withdrawn_excluded(self):
         """Different areas stay separate; withdrawn demand is excluded."""
 
@@ -308,6 +342,10 @@ class TestDecisions(unittest.TestCase):
             200,
         )
 
+    # ---------------------------------------------------------
+    # 9. Delivery date compatibility
+    # ---------------------------------------------------------
+
     def test_different_dates_not_aggregated(self):
         """Orders requiring delivery on different dates stay separate."""
 
@@ -324,8 +362,15 @@ class TestDecisions(unittest.TestCase):
         self.assertEqual(len(results), 2)
 
         self.assertTrue(
-            all(r["retailer_count"] == 1 for r in results)
+            all(
+                r["retailer_count"] == 1
+                for r in results
+            )
         )
+
+    # ---------------------------------------------------------
+    # 10. Supplier delivery service area
+    # ---------------------------------------------------------
 
     def test_no_service_area(self):
         """Supplier outside the delivery area is not eligible."""
@@ -347,17 +392,26 @@ class TestDecisions(unittest.TestCase):
             result["offers"][0]["reasons"],
         )
 
+    # ---------------------------------------------------------
+    # 11. Separate versus coordinated delivery measures
+    # ---------------------------------------------------------
+
     def test_separate_vs_coordinated_measures(self):
         """Baseline trips and proposed trips are recorded separately."""
 
         result = evaluate(
-            [order(1), order(2)],
+            [
+                order(1),
+                order(2),
+            ],
             [offer(1)],
             tiers(),
             as_of=TODAY,
         )[0]
 
-        self.assertEqual(result["baseline_trips"], 2)
+        self.assertEqual(
+            result["baseline_trips"], 2
+        )
 
         self.assertEqual(
             result["best"]["delivery_trips"], 1
@@ -370,6 +424,10 @@ class TestDecisions(unittest.TestCase):
         self.assertEqual(
             result["best"]["distance_km"], 30
         )
+
+    # ---------------------------------------------------------
+    # 12. Highest qualifying supplier price tier
+    # ---------------------------------------------------------
 
     def test_tier_highest_threshold(self):
         """The highest qualifying quantity-price tier is selected."""
@@ -388,7 +446,10 @@ class TestDecisions(unittest.TestCase):
         ]
 
         result = evaluate(
-            [order(1), order(2)],
+            [
+                order(1),
+                order(2),
+            ],
             [offer(1)],
             price_tiers,
             as_of=TODAY,
@@ -398,9 +459,108 @@ class TestDecisions(unittest.TestCase):
             result["best"]["tier_min_kg"], 150
         )
 
+        # R17,350 / 200 kg = R86.75/kg
         self.assertEqual(
             result["best"]["cost_per_kg"], 86.75
         )
+
+    # =========================================================
+    # NEW TESTS: RETAILER INPUT VALIDATION
+    # =========================================================
+
+    # ---------------------------------------------------------
+    # 13. Reject zero-quantity orders
+    # ---------------------------------------------------------
+
+    def test_zero_quantity_rejected(self):
+        """Zero-quantity demand must not enter procurement calculations."""
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "quantity_kg must be positive",
+        ):
+            evaluate(
+                [order(1, q=0)],
+                [offer(1)],
+                tiers(),
+                as_of=TODAY,
+            )
+
+    # ---------------------------------------------------------
+    # 14. Reject negative order quantities
+    # ---------------------------------------------------------
+
+    def test_negative_quantity_rejected(self):
+        """Negative quantities must not create false savings."""
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "quantity_kg must be positive",
+        ):
+            evaluate(
+                [order(1, q=-100)],
+                [offer(1)],
+                tiers(),
+                as_of=TODAY,
+            )
+
+    # ---------------------------------------------------------
+    # 15. Reject negative procurement costs
+    # ---------------------------------------------------------
+
+    def test_negative_baseline_cost_rejected(self):
+        """Negative baseline prices are invalid procurement costs."""
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "baseline_price_per_kg cannot be negative",
+        ):
+            evaluate(
+                [order(1, baseline=-50)],
+                [offer(1)],
+                tiers(),
+                as_of=TODAY,
+            )
+
+    # ---------------------------------------------------------
+    # 16. Require retailer identity
+    # ---------------------------------------------------------
+
+    def test_missing_retailer_rejected(self):
+        """Every committed order must identify its retailer."""
+
+        invalid_order = order(1)
+
+        del invalid_order["retailer_id"]
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "retailer_id is required",
+        ):
+            evaluate(
+                [invalid_order],
+                [offer(1)],
+                tiers(),
+                as_of=TODAY,
+            )
+
+    # ---------------------------------------------------------
+    # 17. Reject nonfinite procurement quantities
+    # ---------------------------------------------------------
+
+    def test_nonfinite_quantity_rejected(self):
+        """NaN must not enter financial calculations."""
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "quantity_kg must be finite",
+        ):
+            evaluate(
+                [order(1, q=float("nan"))],
+                [offer(1)],
+                tiers(),
+                as_of=TODAY,
+            )
 
 
 if __name__ == "__main__":
