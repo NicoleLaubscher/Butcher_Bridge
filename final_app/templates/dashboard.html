@@ -6,9 +6,24 @@
   /
   {{ (metrics.otif_pct|string) ~ '%' if metrics.otif_pct is not none else '—' }}
 </strong></article></div>
-<h2>Compatible procurement batches</h2><p class="muted">Batch recommendations are proposals. Review existing holds before recording a reservation. Savings shown here are estimates based on the supplied orders and quotes.</p>
+<div class="between">
+  <h2>Procurement plan</h2>
+  <nav aria-label="Grouping mode">
+    <a href="{{url_for('home')}}"{% if not planning %} aria-current="page"{% endif %}>Fixed batches</a>
+    <a href="{{url_for('home', grouping='optimised')}}"{% if planning %} aria-current="page"{% endif %}>Optimise retailer groups</a>
+  </nav>
+</div>
+{% if planning.planning_status == 'exact' %}
+<p><strong>Optimised retailer groups.</strong> Exact plan within the model constraints.</p>
+{% elif planning.planning_status == 'fallback' %}
+<p role="status"><strong>Fixed-batch fallback.</strong> {{planning.fallback_reason}}</p>
+{% else %}
+<p><strong>Fixed-batch plan.</strong></p>
+{% endif %}
+<p class="muted">Supplier recommendations are proposals. Review existing holds before recording a reservation. Savings shown here are estimates based on the supplied orders and quotes.</p>
 {% if not batches %}<section class="panel">No committed demand yet. Use Retailer demand to add orders.</section>{% endif %}
-{% for b in batches %}<section class="panel"><div class="between"><h3>Window {{b.window_id}} · {{b.area}} · {{b.needed_date}}</h3><span class="tag {{'success' if b.proposed_offer_id is not none else 'reject'}}">{{b.decision}}</span></div><p>{{b.reason}}</p>
+{% for b in batches %}<section class="panel"><div class="between"><h3>Window {{b.window_id}} · {{b.area}} · {{b.needed_date}}</h3><span class="tag {{'success' if b.proposed_offer_id is not none else 'reject'}}">{{'Baseline procurement' if planning and b.procurement == 'baseline' else b.decision}}</span></div><p>{{b.reason}}</p>
+{% if planning %}<p class="muted">Product {{b.product_id}} · Retailer IDs {{b.retailer_ids|join(', ')}} · Order IDs {{b.order_ids|join(', ')}}</p>{% endif %}
 <div class="metrics small">
   <article><span>Compatible quantity</span><strong>{{b.quantity_kg}} kg</strong></article>
   <article><span>Individual baseline</span><strong>R{{'%.2f'|format(b.baseline_cost_per_kg)}}/kg</strong></article>

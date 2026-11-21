@@ -132,6 +132,7 @@ class TestDecisionRoutes(unittest.TestCase):
             order(3, Decimal("200.00"), baseline=70, window=2, needed_date=regular),
         ]
         self.offers = [offer(1), offer(2, capacity=Decimal("400.30"))]
+        self.price_tiers = tiers() + tiers(2, price=87)
         self.allocations = [
             allocation(1, 1, "100.00", "reserved"),
             allocation(2, 2, "150.00", "released"),
@@ -156,7 +157,7 @@ class TestDecisionRoutes(unittest.TestCase):
         if sql.startswith("SELECT o.*"):
             return self.offers
         if "FROM price_tiers" in sql:
-            return tiers() + tiers(2, price=87)
+            return self.price_tiers
         if "FROM allocations" in sql:
             self.assertNotIn("WHERE", sql.upper())
             return self.allocations
@@ -264,6 +265,74 @@ class TestDecisionRoutes(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"items": [], "proposed_reservation_totals": []})
+
+    def test_optimised_mode_is_explicit_and_keeps_default_api_fields(self):
+        need = self.orders[0]["needed_date"]
+        self.orders = [
+            order(i, Decimal("100.00"), baseline=price, logistics=0, needed_date=need)
+            for i, price in enumerate((120, 120, 60), 1)
+        ]
+        self.offers = [offer(1, capacity=350, fixed=600)]
+        self.offers[0].update(variable_delivery_per_kg=0, handling_cost=0)
+        self.price_tiers = [
+            {"offer_id": 1, "min_quantity_kg": quantity, "price_per_kg": price}
+            for quantity, price in ((1, 105), (200, 90), (300, 88))
+        ]
+        self.allocations = [allocation(1, 2, "50.00", "reserved")]
+
+        with patch.object(bridge_app, "evaluate_optimised_plan", side_effect=AssertionError("Opt-in required")):
+            default = self.client.get("/api/decisions")
+            self.assertEqual(default.status_code, 200)
+            self.assertEqual(self.client.get("/api/decisions?grouping=other").get_json(), default.get_json())
+            fixed_page = self.client.get("/")
+        fixed = default.get_json()
+        self.assertEqual(set(fixed), {"items", "proposed_reservation_totals"})
+        self.assertEqual(len(fixed["items"]), 1)
+        self.assertNotIn("group_id", fixed["items"][0])
+        self.assertEqual(fixed["items"][0]["best"]["total_cost"], 27000)
+        self.assertIn("Fixed-batch plan.", fixed_page.get_data(as_text=True))
+
+        response = self.client.get("/api/decisions?grouping=optimised")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["planning_status"], "exact")
+        self.assertIsNone(payload["fallback_reason"])
+        group, baseline = payload["items"]
+        self.assertEqual(group["order_ids"], [1, 2])
+        self.assertEqual([share["proposed_cost"] for share in group["proposed_retailer_costs"]],
+                         ["9300.00", "9300.00"])
+        self.assertEqual(baseline["order_ids"], [3])
+        self.assertEqual(baseline["procurement"], "baseline")
+        self.assertEqual(baseline["proposed_retailer_costs"], [])
+        self.assertEqual(payload["proposed_reservation_totals"], [
+            {"offer_id": 1, "window_id": 1, "quantity_kg": "200.00"},
+        ])
+
+        dashboard = self.client.get("/?grouping=optimised")
+        self.assertEqual(dashboard.status_code, 200)
+        html = dashboard.get_data(as_text=True)
+        self.assertIn("Exact plan within the model constraints.", html)
+        self.assertIn("Retailer IDs 1, 2 · Order IDs 1, 2", html)
+        self.assertIn("Baseline procurement", html)
+        self.assertEqual(html.count("<caption>Proposed retailer costs</caption>"), 1)
+
+    def test_dashboard_and_api_report_configured_limit_fallback(self):
+        default = self.client.get("/api/decisions").get_json()
+        with patch.dict(bridge_app.app.config, GROUP_PLANNING_MAX_RETAILERS="0"):
+            response = self.client.get("/api/decisions?grouping=optimised")
+            dashboard = self.client.get("/?grouping=optimised")
+
+        self.assertEqual(response.status_code, 200)
+        fallback = response.get_json()
+        self.assertEqual(fallback["planning_status"], "fallback")
+        self.assertIn("retailer bundle limit of 0", fallback["fallback_reason"])
+        self.assertEqual(fallback["proposed_reservation_totals"], default["proposed_reservation_totals"])
+        self.assertEqual([row["order_ids"] for row in fallback["items"]], [[1], [2], [3]])
+        self.assertEqual(dashboard.status_code, 200)
+        html = dashboard.get_data(as_text=True)
+        self.assertIn("Fixed-batch fallback.", html)
+        self.assertIn("retailer bundle limit of 0", html)
+        self.assertNotIn("Exact plan within the model constraints.", html)
 
     def test_get_decisions_fails_safely_for_ambiguous_allocation_rows(self):
         reserved = allocation(1, 1, "100.00", "reserved")

@@ -2,13 +2,17 @@
 """Deterministic procurement evaluator; no database or network dependencies."""
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
 from fractions import Fraction
+from itertools import combinations
 
 if __package__:
+    from .group_formation_planner import GroupOffer, GroupPlanningLimit, GroupPlanningLimits, plan_groups
     from .joint_capacity_planner import plan_offers
 else:
+    from group_formation_planner import GroupOffer, GroupPlanningLimit, GroupPlanningLimits, plan_groups
     from joint_capacity_planner import plan_offers
 
 
@@ -204,8 +208,7 @@ def evaluate(orders, offers, tiers, reserved=None, min_fill=0.95, as_of=None):
     return batches
 
 
-def evaluate_plan(orders, offers, tiers, allocations, min_fill=0.95, as_of=None):
-    """Return batch decisions and Decimal proposal totals for fresh allocation keys."""
+def _allocation_state(allocations):
     reserved = {}
     allocation_statuses = {}
     for allocation in allocations:
@@ -222,49 +225,105 @@ def evaluate_plan(orders, offers, tiers, allocations, min_fill=0.95, as_of=None)
         if status == "reserved":
             reserved[key] = allocation["quantity_kg"]
 
+    return reserved, allocation_statuses
+
+
+def evaluate_plan(orders, offers, tiers, allocations, min_fill=0.95, as_of=None):
+    """Return fixed-batch decisions and Decimal proposal totals for fresh keys."""
+    reserved, allocation_statuses = _allocation_state(allocations)
     return _evaluate(
         orders, offers, tiers, reserved, min_fill, as_of,
         allocation_statuses=allocation_statuses,
     )
 
 
-def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_statuses=None):
+def evaluate_optimised_plan(orders, offers, tiers, allocations, min_fill=0.95,
+                            as_of=None, *, limits=GroupPlanningLimits()):
+    """Return an exact retailer-group plan or a separately evaluated fixed plan."""
+    orders, offers, tiers, allocations = map(tuple, (orders, offers, tiers, allocations))
     as_of = as_of or date.today()
-    reserved = reserved or {}
+    groups = _group_orders(orders)
+    order_ids = [order.get("id") for group in groups.values() for order in group]
+    if any(order_id in (None, "") for order_id in order_ids):
+        raise ValueError("An order ID is required for each committed order.")
+    if len(set(order_ids)) != len(order_ids):
+        raise ValueError("Duplicate committed order IDs cannot be planned.")
 
-    validate_supplier_inputs(offers, tiers, reserved, min_fill)
+    reserved, statuses = _allocation_state(allocations)
+    evaluator = _QuoteEvaluator(offers, tiers, reserved, min_fill, as_of, statuses)
+    try:
+        batches, plan = _optimised_groups(groups, evaluator, limits)
+    except GroupPlanningLimit as limit:
+        items, totals = evaluate_plan(orders, offers, tiers, allocations, min_fill, as_of)
+        for item in items:
+            key = (item["window_id"], item["product_id"], item["needed_date"], item["area"])
+            item.update(_group_details(key, groups[key], item["proposed_offer_id"]))
+        reason = str(limit)
+        if any(item["decision"] == "REJECT_PLANNING_LIMIT" for item in items):
+            reason += " The fixed-batch planner also reached its limit and kept the baselines."
+        planning = {"planning_status": "fallback", "fallback_reason": reason}
+    else:
+        items, totals = _render_plan(batches, plan, optimised=True)
+        planning = {"planning_status": "exact", "fallback_reason": None}
 
-    reserved_by_offer = defaultdict(Decimal)
-    for (offer_id, _window_id), quantity in reserved.items():
-        reserved_by_offer[offer_id] += D(quantity)
+    covered = [order_id for item in items for order_id in item["order_ids"]]
+    if len(covered) != len(order_ids) or set(covered) != set(order_ids):
+        raise RuntimeError("The plan did not cover each committed order exactly once.")
+    return items, totals, planning
 
-    offers = sorted(offers, key=lambda offer: offer["id"])
-    available_by_offer = {
-        offer["id"]: D(offer["capacity_kg"]) - reserved_by_offer[offer["id"]]
-        for offer in offers
-    }
 
+def _group_orders(orders):
     groups = defaultdict(list)
-
-    for o in orders:
-        if o["status"] != "committed":
+    for order in orders:
+        if order["status"] != "committed":
             continue
-
-        validate_order(o)
-
+        validate_order(order)
         key = (
-            o["window_id"],
-            o["product_id"],
-            str(o["needed_date"]),
-            o["delivery_area"],
+            order["window_id"],
+            order["product_id"],
+            str(order["needed_date"]),
+            order["delivery_area"],
         )
+        groups[key].append(order)
+    return groups
 
-        groups[key].append(o)
 
-    batches = []
-    planner_inputs = []
+@dataclass
+class _QuotedBatch:
+    key: tuple
+    orders: list
+    quantity: Decimal
+    baseline: Decimal
+    quotes: dict
+    candidates: list
+    retailer_caps: dict
+    savings: dict
 
-    for key, batch in sorted(groups.items()):
+
+class _QuoteEvaluator:
+    def __init__(self, offers, tiers, reserved, min_fill, as_of, allocation_statuses):
+        self.as_of = as_of or date.today()
+        self.allocation_statuses = allocation_statuses
+        validate_supplier_inputs(offers, tiers, reserved, min_fill)
+        self.min_fill = D(min_fill)
+
+        self.reserved_by_offer = defaultdict(Decimal)
+        for (offer_id, _window_id), quantity in reserved.items():
+            self.reserved_by_offer[offer_id] += D(quantity)
+
+        self.available_by_offer = {}
+        self.offers_by_product = defaultdict(list)
+        for offer in sorted(offers, key=lambda row: row["id"]):
+            offer_id = offer["id"]
+            self.available_by_offer[offer_id] = D(offer["capacity_kg"]) - self.reserved_by_offer[offer_id]
+            if offer["active"]:
+                self.offers_by_product[offer["product_id"]].append(offer)
+
+        self.tiers_by_offer = defaultdict(list)
+        for tier in tiers:
+            self.tiers_by_offer[tier["offer_id"]].append(tier)
+
+    def quote(self, key, batch):
         window, product, need, area = key
         batch = sorted(batch, key=lambda order: order["id"], reverse=True)
         q = sum(D(o["quantity_kg"]) for o in batch)
@@ -284,13 +343,10 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
 
         quotes = {}
 
-        for offer in offers:
-            if offer["product_id"] != product or not offer["active"]:
-                continue
-
+        for offer in self.offers_by_product.get(product, ()):
             reasons = []
 
-            available = available_by_offer[offer["id"]]
+            available = self.available_by_offer[offer["id"]]
 
             if available < q:
                 reasons.append("Insufficient unreserved capacity")
@@ -298,7 +354,7 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
             if offer["service_area"].casefold() != area.casefold():
                 reasons.append("Outside service area")
 
-            days_available = (date.fromisoformat(need) - as_of).days
+            days_available = (date.fromisoformat(need) - self.as_of).days
 
             if (
                 days_available < 0
@@ -306,15 +362,12 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
             ):
                 reasons.append("Lead time exceeds required date")
 
-            if D(offer["fill_rate"]) < D(min_fill):
+            if D(offer["fill_rate"]) < self.min_fill:
                 reasons.append("Below minimum expected fill rate")
 
             eligible_tiers = [
-                t for t in tiers
-                if (
-                    t["offer_id"] == offer["id"]
-                    and D(t["min_quantity_kg"]) <= q
-                )
+                t for t in self.tiers_by_offer.get(offer["id"], ())
+                if D(t["min_quantity_kg"]) <= q
             ]
 
             best_tier = (
@@ -361,11 +414,11 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
                     float(best_tier["min_quantity_kg"])
                     if best_tier else None
                 ),
-                "reserved_kg": float(reserved_by_offer[offer["id"]]),
+                "reserved_kg": float(self.reserved_by_offer[offer["id"]]),
                 "available_kg": float(available),
                 "reservation_key_status": (
-                    allocation_statuses.get((offer["id"], window), "free")
-                    if allocation_statuses is not None else None
+                    self.allocation_statuses.get((offer["id"], window), "free")
+                    if self.allocation_statuses is not None else None
                 ),
                 "delivery_trips": int(offer["coordinated_trips"]),
                 "distance_km": float(offer["coordinated_distance_km"]),
@@ -380,16 +433,96 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
             for quote in candidates
             if quote["total_cost"] < baseline and quote["cost_sharing_reason"] is None
         }
-        batches.append((key, batch, baseline, quotes, candidates, retailer_caps))
-        planner_inputs.append((q, savings))
+        return _QuotedBatch(key, batch, q, baseline, quotes, candidates, retailer_caps, savings)
 
-    plan = plan_offers(planner_inputs, available_by_offer)
+
+def _optimised_groups(groups, evaluator, limits):
+    buckets = []
+    quote_evaluations = 0
+    for key, orders in sorted(groups.items()):
+        by_retailer = defaultdict(list)
+        for order in orders:
+            by_retailer[order["retailer_id"]].append(order)
+        bundles = [bundle for _, bundle in sorted(by_retailer.items())]
+        if len(bundles) > limits.max_retailers_per_bucket:
+            raise GroupPlanningLimit(
+                f"The retailer bundle limit of {limits.max_retailers_per_bucket:,} "
+                "per compatibility bucket was exceeded."
+            )
+
+        offer_count = len(evaluator.offers_by_product.get(key[1], ()))
+        if offer_count:
+            quote_evaluations += ((1 << len(bundles)) - 1) * offer_count
+        if quote_evaluations > limits.max_quote_evaluations:
+            raise GroupPlanningLimit(
+                f"The group-offer evaluation limit of {limits.max_quote_evaluations:,} was exceeded."
+            )
+        buckets.append((key, bundles, offer_count))
+
+    quoted_groups = {}
+    candidates = []
+    decisions = []
+    next_bundle = 0
+    for key, bundles, offer_count in buckets:
+        if not offer_count:
+            decisions.extend((evaluator.quote(key, bundle), None) for bundle in bundles)
+            continue
+        indexed = [(1 << index, bundle) for index, bundle in enumerate(bundles, next_bundle)]
+        next_bundle += len(bundles)
+        for size in range(1, len(bundles) + 1):
+            for group in combinations(indexed, size):
+                mask = sum(bit for bit, _ in group)
+                batch = evaluator.quote(key, [order for _, bundle in group for order in bundle])
+                quoted_groups[mask] = batch
+                candidates.extend(
+                    GroupOffer(mask, offer_id, batch.quantity, savings)
+                    for offer_id, savings in batch.savings.items()
+                )
+
+    selected = plan_groups(candidates, evaluator.available_by_offer, limits.max_search_nodes)
+    assigned_offers = {option.members: option.offer_id for option in selected}
+    assigned_members = sum(assigned_offers)  # Selected masks are disjoint.
+    for mask, batch in quoted_groups.items():
+        if mask in assigned_offers or (mask.bit_count() == 1 and not (mask & assigned_members)):
+            decisions.append((batch, assigned_offers.get(mask)))
+    decisions.sort(key=lambda pair: (pair[0].key, tuple(sorted(pair[0].retailer_caps))))
+
+    batches = [batch for batch, _ in decisions]
+    plan = {index: offer_id for index, (_, offer_id) in enumerate(decisions) if offer_id is not None}
+    return batches, plan
+
+
+def _group_details(key, orders, proposed_offer_id):
+    window, product, need, area = key
+    order_ids = sorted(order["id"] for order in orders)
+    return {
+        "group_id": "orders-" + "-".join(map(str, order_ids)),
+        "retailer_ids": sorted({order["retailer_id"] for order in orders}),
+        "order_ids": order_ids,
+        "source_bucket": {
+            "window_id": window, "product_id": product, "needed_date": need, "delivery_area": area,
+        },
+        "procurement": "supplier" if proposed_offer_id is not None else "baseline",
+    }
+
+
+def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_statuses=None):
+    evaluator = _QuoteEvaluator(offers, tiers, reserved or {}, min_fill, as_of, allocation_statuses)
+    groups = _group_orders(orders)
+    batches = [evaluator.quote(key, group) for key, group in sorted(groups.items())]
+    plan = plan_offers([(batch.quantity, batch.savings) for batch in batches],
+                       evaluator.available_by_offer)
+    return _render_plan(batches, plan)
+
+
+def _render_plan(batches, plan, *, optimised=False):
     outputs = []
     proposed_totals = defaultdict(Decimal)
-
-    for index, (key, batch, baseline, quotes, candidates, retailer_caps) in enumerate(batches):
-        window, product, need, area = key
-        q, savings = planner_inputs[index]
+    for index, quoted in enumerate(batches):
+        window, product, need, area = quoted.key
+        batch, q, baseline = quoted.orders, quoted.quantity, quoted.baseline
+        quotes, candidates = quoted.quotes, quoted.candidates
+        retailer_caps, savings = quoted.retailer_caps, quoted.savings
         proposed_offer_id = plan.get(index) if plan is not None else None
         base_trips = sum(int(o["baseline_trips"]) for o in batch)
         base_distance = sum(D(o["baseline_distance_km"]) for o in batch)
@@ -411,6 +544,11 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
                     "The lowest-cost joint plan proposes this supplier quote "
                     "for multi-retailer aggregation."
                 )
+
+        elif optimised:
+            best = None
+            decision = "INDIVIDUAL_KEEP_BASELINE"
+            reason = "The optimised plan retains this retailer's individual procurement baseline."
 
         elif savings:
             best = None
@@ -500,7 +638,7 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
             if quote["total_cost"] is not None:
                 quote["total_cost"] = float(quote["total_cost"])
 
-        outputs.append({
+        row = {
             "window_id": window,
             "product_id": product,
             "needed_date": need,
@@ -529,6 +667,9 @@ def _evaluate(orders, offers, tiers, reserved, min_fill, as_of, *, allocation_st
                 )
                 else "mixed_or_simulated"
             ),
-        })
+        }
+        if optimised:
+            row.update(_group_details(quoted.key, batch, proposed_offer_id))
+        outputs.append(row)
 
     return outputs, dict(proposed_totals)
