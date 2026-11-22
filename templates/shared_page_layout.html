@@ -1,0 +1,13 @@
+<!doctype html>
+<!-- Ruben: Would you expect these two orders to be compatible? -->
+<!-- Symen: I added this check so a weak option cannot slip through. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Nicole: Can we make this easier to follow on a phone? -->
+<title>{% block title %}ButcherBridge{% endblock %}</title><link rel="stylesheet" href="{{ url_for('static', filename='butcherbridge_design.css') }}"></head>
+<!-- Ruben: Let's keep the calculation separate from the page code. -->
+<body><a class="skip" href="#main">Skip to content</a>
+<!-- Symen: Does this label tell the next person what the number means? -->
+<header class="header"><div class="wrap header-inner"><a class="brand" href="{{ url_for('home') }}"><span class="logo">BB</span><span>ButcherBridge<small>Smarter group procurement</small></span></a>
+<!-- Nicole: This example is fictional, so let's say that clearly. -->
+<nav aria-label="Main navigation"><a href="{{ url_for('home') }}">Dashboard</a><a href="{{ url_for('retailer_demand') }}">Retailer demand</a><a href="{{ url_for('supplier_offer') }}">Supplier offer</a></nav></div></header>
+<main class="wrap" id="main">{% block content %}{% endblock %}</main><footer class="footer">ButcherBridge · BFB 321 Semester Project · Demonstration data only</footer></body></html>
