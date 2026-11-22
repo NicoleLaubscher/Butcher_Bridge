@@ -1,0 +1,17 @@
+{% extends 'shared_page_layout.html' %}{% block title %}Calculation methodology | ButcherBridge{% endblock %}{% block content %}
+<section class="hero"><p class="eyebrow">STEP 2 · MODEL</p><h1>How the decision is made.</h1><p>The standalone Python model compares compatible demand with feasible supplier options using total delivered cost.</p></section>
+<!-- Nicole: This example is fictional, so let's say that clearly. -->
+<section class="panel"><h2>Documented calculations</h2><div class="formula-grid">
+<!-- Ruben: Should we show the reason when this option fails? -->
+<article><h3>1 · Compatible demand</h3><code>Q = Σ qᵢ</code><p>Only matching product, specification, required date and delivery area can be combined.</p></article>
+<article><h3>2 · Volume tier</h3><code>P(Q) = highest qualifying tier</code><p>Use the price threshold reached by the group quantity.</p></article>
+<!-- Symen: Should we keep this rule visible so a retailer can explain the choice? -->
+<article><h3>3 · Total delivered cost</h3><code>TC = QP + F + QV + H</code><p>Include meat, fixed and per-kg delivery, and handling.</p></article>
+<article><h3>4 · Cost per kg</h3><code>LC = TC / Q</code><p>Compare full delivered cost, rather than meat price alone.</p></article>
+<!-- Nicole: I think we should validate this before showing a result. -->
+<article><h3>5 · Supplier feasibility</h3><code>Capacity, lead, fill, area and tier</code><p>Retain failed options with a reason; recommend only feasible suppliers.</p></article>
+<article><h3>6 · Accept or reject aggregation</h3><code>Accept when group LC &lt; individual baseline</code><p>Reject if no supplier qualifies or if grouping ties or costs more.</p></article>
+<!-- Ruben: Would you expect these two orders to be compatible? -->
+<article><h3>7 · Allocate shared delivery</h3><code>Shareᵢ = F × (qᵢ / Q)</code><p>Allocate a shared fixed fee in proportion to retailer kg.</p></article>
+<article><h3>8–10 · Measure results</h3><code>Fill · On-time · OTIF · cost variance</code><p>Compare ordered and actual delivery, timing and spend after the order.</p></article>
+</div><p class="note">Assumptions: fictional supplier prices and service measures, ZAR, kg, one sample product, a R98.60/kg individual baseline. These are not primary data. Validate against real retailer and supplier records before making operational claims.</p></section>{% endblock %}
