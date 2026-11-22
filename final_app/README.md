@@ -1,6 +1,6 @@
 # ButcherBridge — BFB321 Group 06
 
-ButcherBridge helps local meat retailers compare individual procurement with compatible supplier purchases. The final application uses browser forms, Flask and PyMySQL to persist demand, offers, reservations and fulfilments. It compares fixed batches and optimised retailer groups on a common read snapshot and reports actual KPIs from recorded fulfilments. The original classroom simulator has a separate entry point at the repository root.
+ButcherBridge gives meat shops a hand. It runs a starting test. That test shows which supplier fits best for the amount you plan to buy. The finished app relies on browser forms, Flask and PyMySQL. These pieces store demand, offers, reservations and fulfilments. The app lines up the fixed batches against the tuned retailer groups on one shared read snapshot. It also shows real KPIs pulled from fulfilments. 
 
 ## Start the final application
 
@@ -47,41 +47,59 @@ Read the [complete API reference](docs/API_DOCUMENTATION.md) for request/respons
 
 ## Shared-capacity planning
 
-The optimiser takes batches of committed orders with the same order window, product/specification ID, needed date and delivery area. Each batch can use its individual procurement baseline or an eligible supplier offer with a strictly lower delivered cost that can be shared within the retailer caps. The objective is to minimise the sum of these costs across batches.
+The optimiser works with batches of orders that share the same order window, product/specification ID, needed date and delivery area. Each batch can use its procurement baseline or switch to an eligible supplier offer that has a strictly lower delivered cost. These cheaper offers can be shared within the retailer caps. The main goal is to keep the cost across all batches as low as possible.
 
-Capacity is shared by offer ID across all windows. Every MySQL allocation with status `reserved` is deducted, including reservations in the batch's own window and windows outside the current demand. Reservation records identify an offer and window, so their full quantities are deducted before the planner considers new proposals.
+Capacity is shared by offer ID across all windows. Any MySQL allocation that has a status of `reserved` is taken into account. This includes reservations made in the window and also in windows outside the current demand. Each reservation record points to an offer and window, so the full quantity from that record is deducted before the planner looks at new proposals.
 
-If each batch's cheapest choice fits alongside the others, their sum gives the exact minimum. Otherwise the search counts combinations by multiplying the number of cheaper eligible offers plus one baseline choice for each batch. Conflicts above 100,000 combinations retain the baselines and return `REJECT_PLANNING_LIMIT` for batches that had cheaper eligible quotes.
+If the cheapest choice for every batch can fit together without conflict, then adding them up gives the minimum cost.. If conflicts happen, the system checks all possible combinations. It does this by multiplying the number of eligible offers plus one baseline choice for each batch. If the number of combinations goes over 100,000, the system keeps the baselines. Returns `REJECT_PLANNING_LIMIT` for any batch that had cheaper eligible quotes.
 
-In `items`, a quote's `reserved_kg` and `available_kg` are offer totals across all windows before applying any proposals. `eligible` describes the standalone supplier checks for capacity, service area, lead time, fill rate and price tier. `reservation_key_status` is `free`, `reserved` or `released` for the quote's offer and batch window. Both allocation statuses occupy the unique key, so only independently eligible quotes with a free key can be proposed for a new reservation.
+In the `items` section, a quote’s `reserved_kg` and `available_kg` show the quantity across all windows, before any new proposals are applied. The `eligible` field shows whether the quote passes checks for capacity, service area, lead time, fill rate and price tier. The `reservation_key_status` can be `free`, `reserved` or `released`. It applies to the quote’s offer and the batch’s window. Both allocation statuses use the unique key. So only quotes that are independently eligible and have a key can be proposed for a new reservation.
 
-`proposed_offer_id` identifies the supplier selected by the joint plan, or is `null` for baseline procurement. `recommended_savings_pct` compares the plan choice with the baseline and is zero when the batch keeps its baseline. `savings_pct` describes the displayed quotation for comparison.
+The `proposed_offer_id` shows which supplier was picked by the plan. If it’s `null`, then the batch sticks with baseline procurement. The `recommended_savings_pct` compares the chosen plan with the baseline. Is zero when the batch uses the baseline. The `savings_pct` is what gets shown to the user for comparison.
 
-`proposed_reservation_totals` is an array sorted by offer ID and window ID. It contains one entry per selected pair with `quantity_kg` as an exact decimal string without rounding or exponent notation. The total combines selected batch quantities for capacity only. Each batch retains its own price tier and delivery cost. An empty array means the plan made no new capacity proposals.
+`proposed_reservation_totals` is an array sorted by offer ID and window ID. It has one entry for each selected pair. Each entry includes `quantity_kg` as a decimal string, without rounding or scientific notation. The total shows the combined quantity from selected batches, for capacity planning. Each batch keeps its price tier and delivery cost. If the array is empty, it means the plan didn’t make any capacity proposals.
+
+Here’s an example of the format:
 
 ```json
+
 [{"offer_id": 2, "window_id": 1, "quantity_kg": "400.30"}]
+
 ```
 
-Free keys and proposed totals reflect the data read during evaluation. Existing holds require review because the schema records them at offer and window level. Duplicate allocation keys or unrecognised statuses return HTTP 400 with an explanation. Capacity reservations are recorded through a separate `POST /api/allocations` request that checks current capacity before writing.
+keys and proposed totals reflect the data read during evaluation. Existing holds need to be reviewed because the schema stores them at the offer and window level. If there are allocation keys or unknown statuses, the system returns HTTP 400 with a message explaining the issue. Capacity reservations are made through a POST /api/allocations` request. That request checks capacity before saving any changes.
 
 ## Retailer-group optimisation
 
-Fixed batches remain the default on the dashboard and at `GET /api/decisions`. Choose **Optimise retailer groups** on the dashboard or request `GET /api/decisions?grouping=optimised` to opt in. All committed orders for a retailer within one compatibility bucket form one indivisible bundle. Each bundle appears in exactly one multi-retailer purchase, individual supplier purchase or individual baseline. The plan minimises the combined cost of those choices across all buckets, using the same feasibility, capacity, reservation and whole-cent cost-sharing rules as fixed batches.
+Fixed batches are the default behavior on the dashboard. When calling `GET /api/decisions`. To use retailer-group optimisation, choose **Optimise retailer groups** on the dashboard. Use `GET /api/decisions?grouping=optimised`. All committed orders for a retailer within the compatibility bucket are grouped into one indivisible bundle. Each bundle appears in one multi-retailer purchase, one individual supplier purchase or one individual baseline. The plan minimises the cost of these choices across all buckets. It uses the rules as fixed batches for feasibility, capacity, reservation and whole-cent cost-sharing.
 
-The opt-in response adds `planning_status` and `fallback_reason`. A status of `exact` means the search proved the least-cost plan within the model and `fallback_reason` is `null`. A status of `fallback` gives the reason and returns a fresh fixed-batch plan for the complete set of orders. The fixed-batch planner keeps the baselines if its own limit is reached. Both opt-in statuses include `group_id` based on the sorted original order IDs, `retailer_ids`, `order_ids`, a `source_bucket` with the window, product, date and area, and `procurement` (`supplier` or `baseline`) on each item. `proposed_offer_id` identifies the selected offer and is `null` for baseline procurement.
+The opt‑in response adds `planning_status` and `fallback_reason`.
 
-The new search has three server-side limits. Set a nonnegative integer for each using its environment variable or the corresponding Flask config key.
+A status of `exact` means the search proved the least‑cost plan within the model and `fallback_reason` is `null`.
+
+A status of `fallback` gives the reason. Returns a fresh fixed‑batch plan for the complete set of orders.
+
+The fixed‑batch planner keeps the baselines if its own limit is reached.
+
+Both opt‑in statuses include `group_id` based on the original order IDs, `retailer_ids`, `order_ids`, a `source_bucket` with the window, product, date and area and `procurement` (`supplier` or `baseline`) on each item.
+
+`Proposed_offer_id` identifies the selected offer. Is `null` for baseline procurement.
+
+The new search has three server‑side limits. Set an integer for each using its environment variable or the corresponding Flask config key.
 
 | Setting | Default | What it bounds |
+
 |---|---:|---|
-| `GROUP_PLANNING_MAX_RETAILERS` | 8 | Retailer bundles in any one compatibility bucket |
-| `GROUP_PLANNING_MAX_QUOTE_EVALUATIONS` | 5,000 | Subsets paired with active product-matching offers across the request, before the remaining quote checks |
+
+GROUP_PLANNING_MAX_RETAILERS` 8 | Retailer bundles in any one compatibility bucket |
+
+| `GROUP_PLANNING_MAX_QUOTE_EVALUATIONS` | 5,000 | Subsets paired with active product‑matching offers across the request, before the remaining quote checks |
+
 | `GROUP_PLANNING_MAX_SEARCH_NODES` | 100,000 | Nodes visited in the exact search across all buckets |
 
-Eight retailers can generate 255 nonempty subsets before assigning offers. The search processes bundles and ties in a stable order. When any limit is exceeded, the fixed-batch plan is the only result shown. Its status remains `fallback` even if it finds the best fixed-batch assignment.
+Eight retailers can generate 255 subsets before assigning offers. rhe search processes bundles and ties in an order. When any limit is exceeded, the fixed‑batch plan is the result shown.Its status remains `fallback` even if it finds the fixed‑batch assignment`proposed_retailer_costs`. Proposed_reservation_totals` keep their existing formats.
 
-`proposed_retailer_costs` and `proposed_reservation_totals` keep their existing formats. Each selected group is priced as a separate purchase with its own tier and delivery charge. Proposed capacity for groups sharing a free offer/window key is summed into one reservation total. Confirm that the supplier will honour the prices for separate purchases before booking. Decisions remain advisory and use the capacity and holds read for the request.
+Each selected group is priced as a purchase with its own tier and delivery charge.Proposed capacity for groups sharing an offer/window key is summed into one reservation total. Confirm that the supplier will honour the prices for purchases before booking. Decisions remain advisory. Use the capacity and holds read for the request.
 
 ## Comparing the plans
 
@@ -90,6 +108,7 @@ The dashboard shows the two costs from one evaluation alongside the individual p
 The dashboard and signed-in `GET /api/decisions/comparison` read committed demand, offers, tiers and allocations in one MySQL `REPEATABLE READ` transaction with `WITH CONSISTENT SNAPSHOT, READ ONLY`. This assumes the application tables use InnoDB. The dashboard also reads its existing KPI inputs in that transaction. The connection is rolled back and closed after the reads and before planning. Both modes receive the same materialised inputs and the same evaluation date. A later request takes a fresh snapshot. The GET comparison neither books capacity nor writes orders or fulfilments.
 
 Let **B** be total individual baseline, **F** the fixed-batch cost and **O** the optimised cost. Each plan covers every committed order ID once. A selected purchase contributes its delivered quote, rounded half-up to cents as in the decision engine. A retained baseline contributes the full unrounded sum of its order baselines. A diagnostic quote contributes no cost. The comparison calculates the following on exact Decimal totals.
+
 
 | Measure | Amount | Percentage denominator |
 |---|---:|---:|
@@ -128,14 +147,14 @@ To validate the logistics inputs further, collect observed trip costs and payloa
 
 ## Proposed retailer costs
 
-For each batch, the evaluator sums each retailer's order baselines (`kg × baseline price per kg + baseline logistics`) using `Decimal` and rounds the retailer's total down once to whole cents. That amount is the retailer's cap. A quote enters the joint planner only if it costs less than the combined unrounded baseline and its rounded total fits within the sum of the caps. Quotes that beat the raw baseline but exceed the caps carry a `cost_sharing_reason`. If none of the otherwise feasible supplier options can be shared within the caps at a saving, the batch keeps its baseline.
+For each batch, the evaluator adds up each retailers order baselines (`kg × baseline price per kg + baseline logistics`) using `Decimal` and rounds the retailers total down once to cents. That amount is the retailers cap. A quote only enters the planner if it costs less than the combined unrounded baseline and its rounded total fits within the sum of the caps. Quotes that beat the baseline but go over the caps carry a `cost_sharing_reason`. If none of the feasible supplier options can be shared within the caps at a saving, the batch keeps its baseline.
 
-The selected quote is apportioned in proportion to the retailer caps, giving the same percentage saving against each positive cap before cent rounding. After assigning the whole-cent part of each share, any remaining cents go to the largest fractional remainders, with lower retailer IDs breaking ties. The charges sum to the exact quote and stay within the caps. A zero cap gets a zero charge. When all caps are zero, only a zero-cost quote can be fully allocated, and it still has to beat the combined unrounded baseline. Share sizes depend on reliable baseline evidence. For a fixed quote, understating a baseline can reduce that retailer's charge and shift cost to others.
+The chosen quote is split in proportion to the retailer caps, giving the percentage saving against each positive cap before cent rounding. After the whole-cent part of each share is handed out, any remaining cents go to the fractional remainders, with lower retailer IDs breaking ties. The charges add up to the quote and stay within the caps. A zero cap gets a zero charge. When all caps are zero, only a zero-cost quote can be fully. It still has to beat the combined unrounded baseline. Share sizes depend on baseline evidence. For a fixed quote, understating a baseline can lower that retailers charge. Push cost onto others.
 
-Each decision item includes `proposed_retailer_costs` with one row per retailer ID for a selected proposal. The rows contain `retailer_id`, `retailer`, `baseline_cap`, `proposed_cost` and `orders`. The amounts are exact decimal strings with two fractional digits. Each `orders` entry has an `order_id` and its exact `proposed_cost`. A retailer's charge is apportioned to its orders by kg, with lower order IDs breaking rounding ties. The cap applies to the retailer total for the batch. The array is empty when the batch keeps its baseline.
+Each decision item includes `proposed_retailer_costs` with one row per retailer ID for a selected proposal. The rows hold `retailer_id`, `retailer`, `baseline_cap`, `proposed_cost` and `orders`. The amounts are decimal strings with two fractionl digits. Each `orders` entry has an `order_id` and its exact `proposed_cost`. A retailers charge is split across its orders by kg, with lower order ID's breaking rounding ties. The cap applies to the retailer total for the batch. The array is empty when the batch keeps its baseline.
 
-`allocated_costs` retains the numeric per-order response fields. Its values reflect the retailer cost split for proposals. When a rejected quotation is retained for comparison, the field gives a diagnostic split by kg. Use the decimal strings in `proposed_retailer_costs` for exact cent reconciliation. The dashboard shows these proposed amounts as estimates.
+`allocated_costs` keeps the per-order response fields. It's values reflect the retailer cost split for proposals. When a rejected quotation is kept for comparison, the field gives a split by kg. Use the strings in `proposed_retailer_costs` for exact cent reconciliation. The dashboard shows these proposed amounts as estimates.
 
 ## Operations and limitations
 
-The app uses a shared demo password and server-side console logs. Hosting, individual authentication/authorisation, CSRF protection and operational monitoring are separate deployment decisions. The plan compares estimates, and bookings and fulfilments require explicit writes. For data protection, certificate handling, protected logs, isolated recovery tests and release rollback, use the [operations guide](docs/DEPLOYMENT_GUIDE.md#backup-restore-and-rollback). Report only verified evidence from the approved environment.
+The app uses a shared demo password and server-side console logs. Hosting, individual authentication/authorisation, CSRF protection and operational monitoring are deployment decisions. The plan compares estimates and bookings and fulfilments need writes. For data protection, certificate handling, protected logs, isolated recovery tests and release rollback, use the [operations guide](docs/restore-and-rollback). Report only verified evidence from the approved environment.
