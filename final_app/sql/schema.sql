@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS price_tiers (
  offer_id BIGINT NOT NULL,
  min_quantity_kg DECIMAL(12,2) NOT NULL,
  price_per_kg DECIMAL(12,2) NOT NULL,
+ created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
  CONSTRAINT fk_tier_offer FOREIGN KEY (offer_id) REFERENCES supplier_offers(id) ON DELETE CASCADE,
  CONSTRAINT chk_tier CHECK (min_quantity_kg > 0 AND price_per_kg >= 0),
  UNIQUE KEY uq_tier (offer_id,min_quantity_kg)
