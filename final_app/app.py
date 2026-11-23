@@ -3,7 +3,6 @@ import logging
 import os
 from datetime import date
 from decimal import Decimal
-from functools import wraps
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from dotenv import load_dotenv
 from pymysql.err import IntegrityError
@@ -11,13 +10,14 @@ from werkzeug.exceptions import HTTPException
 from db import query, read_snapshot, transaction
 from decision_engine import compare_plans, evaluate_optimised_plan, evaluate_plan
 from group_formation_planner import GroupPlanningLimits
+from auth import require_login
+from scenario_routes import scenarios
+from config import config_by_name
+from functools import wraps
 
 load_dotenv(override=True)
 app=Flask(__name__)
-app.secret_key=os.getenv('SECRET_KEY','')
-app.config['SESSION_COOKIE_HTTPONLY']=True
-app.config['SESSION_COOKIE_SAMESITE']='Lax'
-app.config['SESSION_COOKIE_SECURE']=os.getenv('APP_ENV')=='production'
+app.config.from_object(config_by_name.get(os.getenv('APP_ENV', 'development'), config_by_name['development']))
 group_planning_defaults = GroupPlanningLimits()
 app.config.from_mapping(
     GROUP_PLANNING_MAX_RETAILERS=os.getenv(
@@ -31,7 +31,13 @@ app.config.from_mapping(
     ),
 )
 logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
+from logging.handlers import RotatingFileHandler
+os.makedirs('logs', exist_ok=True)
+_file_log = RotatingFileHandler('logs/app.log', maxBytes=1_000_000, backupCount=3, encoding='utf-8')
+_file_log.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+logging.getLogger().addHandler(_file_log)
 
+app.register_blueprint(scenarios)
 ORDER_DETAILS = '''SELECT d.*,r.name AS retailer_name,p.name AS product_name,p.specification,
         w.label AS window_label FROM demand_orders d JOIN retailers r ON r.id=d.retailer_id
         JOIN products p ON p.id=d.product_id JOIN order_windows w ON w.id=d.window_id'''
@@ -138,6 +144,46 @@ def rand_amount(value):
     whole, _, fraction = format(abs(amount), ',f').partition('.')
     return f"{sign}R{whole}.{fraction.rstrip('0').ljust(2, '0')}"
 
+@app.patch('/api/offers/<int:offer_id>')
+@require_login
+def api_update_offer(offer_id):
+    data = body()
+    numeric = {'capacity_kg': positive, 'fixed_delivery': nonnegative,
+               'variable_delivery_per_kg': nonnegative, 'handling_cost': nonnegative}
+    allowed = set(numeric) | {'lead_days', 'fill_rate', 'active', 'evidence_note'}
+    if not data or set(data) - allowed:
+        raise ValueError('Unsupported or empty update fields')
+    parts, params = [], []
+    for key, value in data.items():
+        if key in numeric:
+            parsed = numeric[key](data, key)
+        elif key == 'lead_days':
+            parsed = int(nonnegative(data, key))
+        elif key == 'fill_rate':
+            parsed = nonnegative(data, key)
+            if parsed > 1:
+                raise ValueError('fill_rate must be a fraction from 0 to 1')
+        elif key == 'active':
+            if not isinstance(value, bool):
+                raise ValueError('active must be true or false')
+            parsed = int(value)
+        else:
+            parsed = str(value)[:500]
+        parts.append(key + '=%s')
+        params.append(parsed)
+    with transaction() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id FROM supplier_offers WHERE id=%s FOR UPDATE', (offer_id,))
+            if not cur.fetchone():
+                return jsonify(error='Offer not found'), 404
+            if 'capacity_kg' in data:
+                cur.execute("SELECT COALESCE(SUM(quantity_kg),0) AS used FROM allocations "
+                            "WHERE offer_id=%s AND status='reserved'", (offer_id,))
+                if Decimal(str(cur.fetchone()['used'])) > params[parts.index('capacity_kg=%s')]:
+                    raise ValueError('capacity_kg cannot be lower than the quantity already reserved')
+            cur.execute('UPDATE supplier_offers SET ' + ','.join(parts) + ' WHERE id=%s', params + [offer_id])
+    return jsonify(id=offer_id, message='Offer updated')
+
 
 @app.get('/')
 @require_login
@@ -213,17 +259,24 @@ def order_payload(d):
             area,positive(d,'quantity_kg'),nonnegative(d,'baseline_price_per_kg'),nonnegative(d,'baseline_logistics_cost'),
             int(nonnegative(d,'baseline_trips',1)),nonnegative(d,'baseline_distance_km'),status,evidence,str(d.get('evidence_note',''))[:500])
 
-@app.get('/api/orders')
+@app.get('/api/offers')
 @require_login
-def api_orders():
-    page=int(request.args.get('page','1'));size=int(request.args.get('size','20'))
-    if not 1<=page<=100000 or not 1<=size<=100: raise ValueError('page must be positive and size between 1 and 100')
-    status=request.args.get('status','')
-    if status and status not in ('draft','committed','withdrawn','fulfilled'): raise ValueError('Invalid status filter')
-    where=' WHERE d.status=%s' if status else ''
-    params=[status] if status else []
-    rows=query('''SELECT d.*,r.name AS retailer_name FROM demand_orders d JOIN retailers r ON r.id=d.retailer_id'''+where+' ORDER BY d.id DESC LIMIT %s OFFSET %s',params+[size,(page-1)*size])
-    return jsonify(items=rows,page=page,size=size)
+def api_offers():
+    try:
+        page = int(request.args.get('page', '1')); size = int(request.args.get('size', '20'))
+    except ValueError:
+        raise ValueError('page and size must be whole numbers')
+    if not 1 <= page <= 100000 or not 1 <= size <= 100:
+        raise ValueError('page must be positive and size between 1 and 100')
+    supplier_id = request.args.get('supplier_id', '')
+    if supplier_id and not supplier_id.isdigit():
+        raise ValueError('supplier_id must be a whole number')
+    where = ' WHERE o.supplier_id=%s' if supplier_id else ''
+    rows = query('''SELECT o.*,s.name AS supplier_name,s.service_area FROM supplier_offers o
+                    JOIN suppliers s ON s.id=o.supplier_id''' + where +
+                 ' ORDER BY o.id LIMIT %s OFFSET %s',
+                 ([int(supplier_id)] if supplier_id else []) + [size, (page - 1) * size])
+    return jsonify(items=rows, page=page, size=size)
 
 @app.get('/api/orders/<int:oid>')
 @require_login

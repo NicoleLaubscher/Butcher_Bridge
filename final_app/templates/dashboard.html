@@ -74,6 +74,40 @@
   /
   {{ (metrics.otif_pct|string) ~ '%' if metrics.otif_pct is not none else '—' }}
 </strong></article></div>
+<div class="metrics">
+  <article><span>Committed orders</span><strong>{{comparison.committed_order_count}}</strong></article>
+  <article><span>Individual procurement cost</span><strong>{{comparison.baseline_total|rand_amount}}</strong></article>
+  <article><span>Estimated saving (grouped)</span><strong>{{comparison.optimised.savings_vs_baseline|rand_amount}}</strong></article>
+  <article><span>Saving vs individual</span><strong>{{comparison.optimised.savings_pct_of_baseline ~ '%' if comparison.optimised.savings_pct_of_baseline is not none else '—'}}</strong></article>
+</div>
+<section class="panel" id="scenario-lab" aria-labelledby="scenario-title">
+  <h2 id="scenario-title">Order grouping scenarios</h2>
+  <p class="muted">See when a group order is accepted, when it is rejected, and when buying individually is cheaper. Each result is computed live by the same decision engine as the plan below, using simulated numbers (nothing is saved).</p>
+  <div class="scroll" role="region" aria-label="Scenario results" tabindex="0">
+    <table id="scenario-summary"><caption>All scenarios — pick one to inspect</caption>
+      <thead><tr><th scope="col">Scenario</th><th scope="col">Outcome</th><th scope="col">Everyone alone</th><th scope="col">Single group quote</th><th scope="col">Recommended plan</th><th scope="col">Saving</th></tr></thead>
+      <tbody><tr><td colspan="6">Loading scenarios…</td></tr></tbody></table>
+  </div>
+  <div id="scenario-detail" class="scenario-detail" aria-live="polite"></div>
+  <details class="scenario-custom"><summary>Build your own scenario</summary>
+    <form id="scenario-form" class="formgrid" novalidate>
+      <label>Days until stock is needed<input name="days_until_needed" type="number" min="0" step="1" required></label>
+      <label>Supplier free capacity (kg)<input name="capacity_kg" type="number" min="0.01" step="0.01" required></label>
+      <label>Already reserved by others (kg)<input name="reserved_kg" type="number" min="0" step="0.01" required></label>
+      <label>Supplier lead time (days)<input name="lead_days" type="number" min="0" step="1" required></label>
+      <label>Expected fill rate (0–1)<input name="fill_rate" type="number" min="0" max="1" step="0.01" required></label>
+      <label>Fixed delivery fee (R)<input name="fixed_delivery" type="number" min="0" step="0.01" required></label>
+      <label>Delivery per kg (R)<input name="variable_delivery_per_kg" type="number" min="0" step="0.01" required></label>
+      <label>Handling fee (R)<input name="handling_cost" type="number" min="0" step="0.01" required></label>
+      <label>Price tiers (min kg : R/kg)<input name="tiers_text" required></label>
+      <div class="wide"><strong>Retailers</strong> <span class="muted">name · kg · own price R/kg · own logistics R</span>
+        <div id="custom-retailers"></div>
+        <button type="button" id="add-retailer" class="quiet">Add retailer</button></div>
+      <button>Run scenario</button><p id="scenario-feedback" role="status" class="wide"></p>
+    </form>
+  </details>
+</section>
+<script src="{{url_for('static',filename='scenario_lab.js')}}" defer></script>
 <h2>Procurement plan</h2>
 {% if mode == 'fixed' %}
 <p><strong>Fixed-batch plan.</strong></p>

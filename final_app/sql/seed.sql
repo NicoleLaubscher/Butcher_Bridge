@@ -15,3 +15,14 @@ INSERT INTO demand_orders (id,retailer_id,product_id,window_id,needed_date,deliv
 (2,2,1,1,'2027-12-08','Soweto',150,95,600,1,30,'committed','simulated','Illustrative course scenario'),
 (3,3,1,1,'2027-12-08','Soweto',250,95,600,1,40,'committed','simulated','Illustrative course scenario')
 ON DUPLICATE KEY UPDATE quantity_kg=VALUES(quantity_kg);
+INSERT INTO retailers (id,name,area) VALUES (4,'Township Meats','Soweto'),(5,'Corner Butchery','Soweto') ON DUPLICATE KEY UPDATE name=VALUES(name);
+INSERT INTO demand_orders (id,retailer_id,product_id,window_id,needed_date,delivery_area,quantity_kg,baseline_price_per_kg,baseline_logistics_cost,baseline_trips,baseline_distance_km,status,evidence_type,evidence_note) VALUES
+(4,4,1,2,'2027-12-09','Soweto',120,96,550,1,28,'fulfilled','simulated','Illustrative past order'),
+(5,5,1,2,'2027-12-09','Soweto',80,97,500,1,22,'fulfilled','simulated','Illustrative past order')
+ON DUPLICATE KEY UPDATE quantity_kg=VALUES(quantity_kg);
+INSERT INTO allocations (id,offer_id,window_id,quantity_kg,status) VALUES
+(1,1,2,50,'reserved'),(2,2,2,100,'released')
+ON DUPLICATE KEY UPDATE quantity_kg=VALUES(quantity_kg);
+INSERT INTO fulfilments (id,demand_order_id,delivered_kg,planned_days,actual_days,quoted_cost,actual_cost) VALUES
+(1,4,120,3,3,11900,11750),(2,5,80,3,4,8000,8120)
+ON DUPLICATE KEY UPDATE delivered_kg=VALUES(delivered_kg);
