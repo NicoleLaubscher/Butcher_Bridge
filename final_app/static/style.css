@@ -139,3 +139,22 @@
 .retailer-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:.5rem;margin:.4rem 0}
 #scenario-feedback.ok{color:#146237}
 @media(max-width:800px){.scenario-columns{grid-template-columns:1fr}.bar-row{grid-template-columns:1fr}.retailer-row{grid-template-columns:1fr 1fr}}
+
+/* Fixed Nguni image background with translucent surfaces for the app UI. */
+html{min-height:100%}
+body{
+  min-height:100vh;
+  background-color:#f4f6f4;
+  background-image:linear-gradient(rgba(244,246,244,.34),rgba(244,246,244,.34)),url("nguni-background.jpg");
+  background-position:center center;
+  background-size:cover;
+  background-repeat:no-repeat;
+  background-attachment:fixed;
+}
+header{background:rgba(16,59,59,.9);backdrop-filter:blur(8px)}
+.hero{background:rgba(225,237,233,.84);backdrop-filter:blur(7px)}
+.metrics article,.panel{background:rgba(255,255,255,.84);backdrop-filter:blur(8px)}
+.comparison-card{background:rgba(245,248,246,.86);backdrop-filter:blur(6px)}
+.comparison-incremental{background:rgba(225,237,233,.88);backdrop-filter:blur(6px)}
+th{background:rgba(245,248,246,.94)}
+footer{background:rgba(255,255,255,.74);backdrop-filter:blur(6px)}
