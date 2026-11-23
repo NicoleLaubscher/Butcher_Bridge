@@ -10,7 +10,6 @@ from werkzeug.exceptions import HTTPException
 from db import query, read_snapshot, transaction
 from decision_engine import compare_plans, evaluate_optimised_plan, evaluate_plan
 from group_formation_planner import GroupPlanningLimits
-from auth import require_login
 from scenario_routes import scenarios
 from config import config_by_name
 from functools import wraps
@@ -149,26 +148,57 @@ def rand_amount(value):
 def api_update_offer(offer_id):
     data = body()
     numeric = {'capacity_kg': positive, 'fixed_delivery': nonnegative,
-               'variable_delivery_per_kg': nonnegative, 'handling_cost': nonnegative}
-    allowed = set(numeric) | {'lead_days', 'fill_rate', 'active', 'evidence_note'}
+               'variable_delivery_per_kg': nonnegative, 'handling_cost': nonnegative,
+               'coordinated_distance_km': nonnegative}
+    allowed = set(numeric) | {'coordinated_trips', 'lead_days', 'fill_rate', 'active', 'evidence_note', 'evidence_type', 'tiers'}
     if not data or set(data) - allowed:
         raise ValueError('Unsupported or empty update fields')
+    tier_rows = None
+    if 'tiers' in data:
+        tiers = data['tiers']
+        if not isinstance(tiers, list) or not tiers:
+            raise ValueError('Supply at least one price tier')
+        if len(tiers) > 20:
+            raise ValueError('Maximum 20 tiers')
+        tier_rows = []
+        for tier in tiers:
+            if not isinstance(tier, dict):
+                raise ValueError('Invalid tier')
+            tier_rows.append((positive(tier, 'min_quantity_kg'), nonnegative(tier, 'price_per_kg')))
+        if len({row[0] for row in tier_rows}) != len(tier_rows):
+            raise ValueError('Duplicate price tier threshold')
     parts, params = [], []
     for key, value in data.items():
+        if key == 'tiers':
+            continue
         if key in numeric:
             parsed = numeric[key](data, key)
         elif key == 'lead_days':
-            parsed = int(nonnegative(data, key))
+            number = nonnegative(data, key)
+            if number != number.to_integral_value():
+                raise ValueError('lead_days must be a whole number')
+            parsed = int(number)
         elif key == 'fill_rate':
             parsed = nonnegative(data, key)
             if parsed > 1:
                 raise ValueError('fill_rate must be a fraction from 0 to 1')
+        elif key == 'coordinated_trips':
+            parsed = nonnegative(data, key)
+            if parsed != parsed.to_integral_value():
+                raise ValueError('coordinated_trips must be a whole number')
+            parsed = int(parsed)
         elif key == 'active':
             if not isinstance(value, bool):
                 raise ValueError('active must be true or false')
             parsed = int(value)
+        elif key == 'evidence_type':
+            if value not in ('primary', 'quoted', 'estimated', 'simulated'):
+                raise ValueError('Invalid evidence type')
+            parsed = value
         else:
-            parsed = str(value)[:500]
+            parsed = str(value).strip()
+            if len(parsed) > 500:
+                raise ValueError('evidence_note must be 500 characters or fewer')
         parts.append(key + '=%s')
         params.append(parsed)
     with transaction() as conn:
@@ -179,9 +209,17 @@ def api_update_offer(offer_id):
             if 'capacity_kg' in data:
                 cur.execute("SELECT COALESCE(SUM(quantity_kg),0) AS used FROM allocations "
                             "WHERE offer_id=%s AND status='reserved'", (offer_id,))
-                if Decimal(str(cur.fetchone()['used'])) > params[parts.index('capacity_kg=%s')]:
+                capacity = params[parts.index('capacity_kg=%s')]
+                if Decimal(str(cur.fetchone()['used'])) > capacity:
                     raise ValueError('capacity_kg cannot be lower than the quantity already reserved')
-            cur.execute('UPDATE supplier_offers SET ' + ','.join(parts) + ' WHERE id=%s', params + [offer_id])
+            if parts:
+                cur.execute('UPDATE supplier_offers SET ' + ','.join(parts) + ' WHERE id=%s', params + [offer_id])
+            if tier_rows is not None:
+                cur.execute('DELETE FROM price_tiers WHERE offer_id=%s', (offer_id,))
+                cur.executemany(
+                    'INSERT INTO price_tiers (offer_id,min_quantity_kg,price_per_kg) VALUES (%s,%s,%s)',
+                    [(offer_id, *row) for row in tier_rows],
+                )
     return jsonify(id=offer_id, message='Offer updated')
 
 
@@ -209,6 +247,14 @@ def orders_page():
 @require_login
 def offers_page():
     offers=all_offers(); tiers=query('SELECT * FROM price_tiers ORDER BY offer_id,min_quantity_kg')
+    tiers_by_offer = {}
+    for tier in tiers:
+        tiers_by_offer.setdefault(tier['offer_id'], []).append(tier)
+    for offer in offers:
+        offer['tiers_text'] = ','.join(
+            f"{tier['min_quantity_kg']}:{tier['price_per_kg']}"
+            for tier in tiers_by_offer.get(offer['id'], [])
+        )
     return render_template('offers.html',offers=offers,tiers=tiers,**lookup_data())
 
 @app.get('/fulfilment')

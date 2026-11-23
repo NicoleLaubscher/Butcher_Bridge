@@ -36,6 +36,7 @@ Configure the [environment template](.env.example) privately with the approved s
 | PATCH | `/api/orders/1` | Update before window closes |
 | GET | `/api/offers` | List offers |
 | POST | `/api/offers` | Create offer and tiers |
+| PATCH | `/api/offers/<offer_id>` | Edit offer terms and replace price tiers |
 | GET | `/api/decisions` | Read-only batch recommendations, quote comparisons and proposed reservation totals. |
 | GET | `/api/decisions?grouping=optimised` | Opt-in retailer-group planning and explicit search status. |
 | GET | `/api/decisions/comparison` | Read-only cost and status comparison of both plans on one snapshot. |

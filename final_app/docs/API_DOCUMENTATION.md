@@ -29,13 +29,14 @@ Flask preserves Werkzeug HTTP statuses and headers. For example, `PUT /api/order
 | PATCH | `/api/orders/<oid>` | Edit selected fields, commit or withdraw | 200 | Lock and update order |
 | GET | `/api/offers` | List current offer records and supplier fields | 200 | Read offers and suppliers |
 | POST | `/api/offers` | Create an offer with price tiers | 201 | Insert offer and tiers together |
+| PATCH | `/api/offers/<offer_id>` | Update offer terms and optionally replace all price tiers | 200 | Lock offer, validate reserved capacity, update offer and tiers atomically |
 | GET | `/api/decisions` | Fixed batches or `?grouping=optimised` | 200 | Read orders, offers, tiers and allocations |
 | GET | `/api/decisions/comparison` | Compare costs on a single snapshot | 200 | Read the same inputs in one read-only transaction |
 | GET | `/api/kpis` | Recorded orders, committed kg and actual fulfilment | 200 | Read demand and linked fulfilments |
 | POST | `/api/allocations` | Confirm a capacity reservation for an offer/window | 201 | Lock offer, check remaining capacity, insert allocation |
 | POST | `/api/fulfilments` | Record delivery for a committed order | 201 | Insert outcome and mark order fulfilled atomically |
 
-Orders support create, list, detail and partial update. Offers support create and list. Allocation release, offer update, fulfilment correction and deletion endpoints are absent. The reference catalogs (retailers, products, suppliers and windows) are read by UI forms and have no management API.
+Orders support create, list, detail and partial update. Offers support create, list and partial update. Allocation release, fulfilment correction and deletion endpoints are absent. The reference catalogs (retailers, products, suppliers and windows) are read by UI forms and have no management API.
 
 ## Orders
 
@@ -97,6 +98,16 @@ Send a nonempty subset of `quantity_kg`, `baseline_price_per_kg`, `baseline_logi
 ```
 
 `POST /api/offers` requires positive `supplier_id`, `product_id`, `capacity_kg` and a `tiers` array of 1–20 records with distinct positive `min_quantity_kg` and nonnegative `price_per_kg`. Send nonnegative whole `lead_days`, a `fill_rate` fraction from 0 to 1, and optional nonnegative `fixed_delivery`, `variable_delivery_per_kg`, `handling_cost`, `coordinated_trips` and `coordinated_distance_km`. Defaults are zero except one coordinated trip and `active=1` from MySQL. Evidence fields follow the order rules. The HTML form converts comma-separated tiers into the structured JSON expected by the API.
+
+`PATCH /api/offers/<offer_id>` accepts one or more of `capacity_kg`, `lead_days`, `fill_rate`, `fixed_delivery`, `variable_delivery_per_kg`, `handling_cost`, `coordinated_trips`, `coordinated_distance_km`, `active`, `evidence_type`, `evidence_note` and `tiers`. Numeric values are validated; lead days and coordinated trips must be whole numbers, fill rate must be between 0 and 1, and evidence type must be `primary`, `quoted`, `estimated` or `simulated`. If `tiers` is supplied, it replaces the full tier list and must contain 1–20 unique, positive quantity thresholds with nonnegative prices. The offer row is locked while it is updated; capacity cannot be reduced below currently reserved quantity. Offer changes and tier replacement commit together. Unknown offer IDs return 404; invalid values return 400.
+
+```json
+{"capacity_kg":"200.00","lead_days":3,"evidence_type":"quoted","evidence_note":"Supplier quote Q-14","tiers":[{"min_quantity_kg":"1.00","price_per_kg":"92.00"},{"min_quantity_kg":"100.00","price_per_kg":"81.50"}]}
+```
+
+```json
+{"id":4,"message":"Offer updated"}
+```
 
 ```json
 {"supplier_id":1,"product_id":1,"capacity_kg":"150.00","lead_days":2,"fill_rate":"0.98","fixed_delivery":"100.00","variable_delivery_per_kg":"1.00","handling_cost":"25.00","evidence_type":"simulated","evidence_note":"Fictional example","tiers":[{"min_quantity_kg":"1.00","price_per_kg":"90.00"},{"min_quantity_kg":"100.00","price_per_kg":"80.00"}]}

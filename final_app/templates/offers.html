@@ -1,4 +1,130 @@
-{% extends 'layout.html' %}{% block content %}<div class="hero"><h1>Supplier offers</h1><p>Record available capacity, price tiers and realistic service conditions. All amounts must be traceable to an evidence source.</p></div>
-<section class="panel"><h2>Create supplier offer</h2><form id="offer-form" class="formgrid"><label>Supplier<select name="supplier_id">{% for s in suppliers %}<option value="{{s.id}}">{{s.name}} · {{s.service_area}}</option>{% endfor %}</select></label><label>Product<select name="product_id">{% for p in products %}<option value="{{p.id}}">{{p.name}} · {{p.specification}}</option>{% endfor %}</select></label><label>Capacity (kg)<input name="capacity_kg" type="number" min="0.01" step="0.01" required></label><label>Lead days<input name="lead_days" type="number" min="0" required></label><label>Expected fill rate (0–1)<input name="fill_rate" type="number" min="0" max="1" step="0.01" value="0.98" required></label><label>Fixed delivery (R)<input name="fixed_delivery" type="number" min="0" step="0.01" value="0"></label><label>Variable delivery (R/kg)<input name="variable_delivery_per_kg" type="number" min="0" step="0.01" value="0"></label><label>Handling (R)<input name="handling_cost" type="number" min="0" step="0.01" value="0"></label><label>Coordinated trips<input name="coordinated_trips" type="number" min="0" value="1"></label><label>Coordinated distance (km)<input name="coordinated_distance_km" type="number" min="0" step="0.01" value="0"></label><label>Evidence type<select name="evidence_type"><option value="simulated">Simulated</option><option value="quoted">Quoted</option><option value="primary">Primary</option><option value="estimated">Estimated</option></select></label><label class="wide">Price tiers: minimum_kg:price_per_kg (comma-separated)<input name="tiers_text" value="1:95,300:88,500:82" required></label><label class="wide">Evidence source<input name="evidence_note" placeholder="Supplier quote reference / assumptions"></label><button>Create offer</button><p id="offer-feedback" role="status"></p></form></section>
-<section class="panel"><h2>Existing offers</h2><div class="scroll"><table><thead><tr><th>ID</th><th>Supplier</th><th>Capacity</th><th>Lead</th><th>Fill rate</th><th>Pricing tiers</th><th>Evidence</th></tr></thead><tbody>{% for o in offers %}<tr><td>{{o.id}}</td><td>{{o.supplier_name}}</td><td>{{o.capacity_kg}}</td><td>{{o.lead_days}} days</td><td>{{o.fill_rate}}</td><td>{% for t in tiers if t.offer_id==o.id %}{{t.min_quantity_kg}} kg→R{{t.price_per_kg}}; {% endfor %}</td><td>{{o.evidence_type}}</td></tr>{% endfor %}</tbody></table></div></section>
-<script>document.querySelector('#offer-form').addEventListener('submit',async e=>{e.preventDefault();let d=Object.fromEntries(new FormData(e.target).entries());try{d.tiers=d.tiers_text.split(',').map(p=>{let a=p.trim().split(':');if(a.length!==2)throw Error('Use minimum_kg:price_per_kg');return {min_quantity_kg:a[0],price_per_kg:a[1]}});delete d.tiers_text;let r=await fetch('/api/offers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});let x=await r.json();if(!r.ok)throw Error(x.error);location.reload()}catch(err){document.querySelector('#offer-feedback').textContent=err.message}})</script>{% endblock %}
+{% extends 'layout.html' %}
+{% block content %}
+<div class="hero">
+  <h1>Supplier offers</h1>
+  <p>Record available capacity, price tiers and realistic service conditions. All amounts must be traceable to an evidence source.</p>
+</div>
+
+<section class="panel">
+  <h2>Create supplier offer</h2>
+  <form id="offer-form" class="formgrid">
+    <label>Supplier<select name="supplier_id">{% for s in suppliers %}<option value="{{s.id}}">{{s.name}} · {{s.service_area}}</option>{% endfor %}</select></label>
+    <label>Product<select name="product_id">{% for p in products %}<option value="{{p.id}}">{{p.name}} · {{p.specification}}</option>{% endfor %}</select></label>
+    <label>Capacity (kg)<input name="capacity_kg" type="number" min="0.01" step="0.01" required></label>
+    <label>Lead days<input name="lead_days" type="number" min="0" step="1" required></label>
+    <label>Expected fill rate (0–1)<input name="fill_rate" type="number" min="0" max="1" step="0.01" value="0.98" required></label>
+    <label>Fixed delivery (R)<input name="fixed_delivery" type="number" min="0" step="0.01" value="0"></label>
+    <label>Variable delivery (R/kg)<input name="variable_delivery_per_kg" type="number" min="0" step="0.01" value="0"></label>
+    <label>Handling (R)<input name="handling_cost" type="number" min="0" step="0.01" value="0"></label>
+    <label>Coordinated trips<input name="coordinated_trips" type="number" min="0" step="1" value="1"></label>
+    <label>Coordinated distance (km)<input name="coordinated_distance_km" type="number" min="0" step="0.01" value="0"></label>
+    <label>Evidence type<select name="evidence_type"><option value="simulated">Simulated</option><option value="quoted">Quoted</option><option value="primary">Primary</option><option value="estimated">Estimated</option></select></label>
+    <label class="wide">Price tiers: minimum_kg:price_per_kg (comma-separated)<input name="tiers_text" value="1:95,300:88,500:82" required></label>
+    <label class="wide">Evidence source<input name="evidence_note" maxlength="500" placeholder="Supplier quote reference / assumptions"></label>
+    <button>Create offer</button><p id="offer-feedback" role="status" aria-live="polite"></p>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Existing offers</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>ID</th><th>Supplier</th><th>Capacity</th><th>Lead</th><th>Fill rate</th><th>Pricing tiers</th><th>Evidence</th><th>Action</th></tr></thead>
+      <tbody>
+      {% for o in offers %}
+        <tr>
+          <td>{{o.id}}</td><td>{{o.supplier_name}}</td><td>{{o.capacity_kg}}</td><td>{{o.lead_days}} days</td><td>{{o.fill_rate}}</td>
+          <td>{% for t in tiers if t.offer_id==o.id %}{{t.min_quantity_kg}} kg→R{{t.price_per_kg}}{% if not loop.last %}; {% endif %}{% endfor %}</td>
+          <td>{{o.evidence_type}}{% if not o.active %} · Inactive{% endif %}</td>
+          <td><button type="button" class="edit-toggle" aria-expanded="false" aria-controls="edit-offer-{{o.id}}">Edit</button></td>
+        </tr>
+        <tr class="edit-row"><td colspan="8">
+          <form id="edit-offer-{{o.id}}" class="formgrid offer-edit-form" data-offer-id="{{o.id}}" hidden>
+            <h3 class="wide">Edit offer #{{o.id}} · {{o.supplier_name}}</h3>
+            <label>Capacity (kg)<input name="capacity_kg" type="number" min="0.01" step="0.01" value="{{o.capacity_kg}}" required></label>
+            <label>Lead days<input name="lead_days" type="number" min="0" step="1" value="{{o.lead_days}}" required></label>
+            <label>Expected fill rate (0–1)<input name="fill_rate" type="number" min="0" max="1" step="0.0001" value="{{o.fill_rate}}" required></label>
+            <label>Fixed delivery (R)<input name="fixed_delivery" type="number" min="0" step="0.01" value="{{o.fixed_delivery}}" required></label>
+            <label>Variable delivery (R/kg)<input name="variable_delivery_per_kg" type="number" min="0" step="0.01" value="{{o.variable_delivery_per_kg}}" required></label>
+            <label>Handling (R)<input name="handling_cost" type="number" min="0" step="0.01" value="{{o.handling_cost}}" required></label>
+            <label>Coordinated trips<input name="coordinated_trips" type="number" min="0" step="1" value="{{o.coordinated_trips}}" required></label>
+            <label>Coordinated distance (km)<input name="coordinated_distance_km" type="number" min="0" step="0.01" value="{{o.coordinated_distance_km}}" required></label>
+            <label>Evidence type<select name="evidence_type"><option value="simulated" {% if o.evidence_type=='simulated' %}selected{% endif %}>Simulated</option><option value="quoted" {% if o.evidence_type=='quoted' %}selected{% endif %}>Quoted</option><option value="primary" {% if o.evidence_type=='primary' %}selected{% endif %}>Primary</option><option value="estimated" {% if o.evidence_type=='estimated' %}selected{% endif %}>Estimated</option></select></label>
+            <label>Status<select name="active"><option value="true" {% if o.active %}selected{% endif %}>Active</option><option value="false" {% if not o.active %}selected{% endif %}>Inactive</option></select></label>
+            <label class="wide">Price tiers: minimum_kg:price_per_kg (comma-separated)<input name="tiers_text" value="{{o.tiers_text}}" required></label>
+            <label class="wide">Evidence source<input name="evidence_note" maxlength="500" value="{{o.evidence_note or ''}}"></label>
+            <div class="wide"><button type="submit">Save changes</button> <button type="button" class="cancel-edit">Cancel</button><p class="edit-feedback" role="status" aria-live="polite"></p></div>
+          </form>
+        </td></tr>
+      {% else %}
+        <tr><td colspan="8">No supplier offers have been added yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+function parseTiers(text) {
+  const tiers = text.split(',').map(part => {
+    const values = part.trim().split(':');
+    if (values.length !== 2 || values.some(value => value.trim() === '')) {
+      throw new Error('Enter tiers as minimum_kg:price_per_kg, separated by commas.');
+    }
+    const [min_quantity_kg, price_per_kg] = values.map(value => value.trim());
+    if (!Number.isFinite(Number(min_quantity_kg)) || Number(min_quantity_kg) <= 0 ||
+        !Number.isFinite(Number(price_per_kg)) || Number(price_per_kg) < 0) {
+      throw new Error('Tier quantities must be positive and prices cannot be negative.');
+    }
+    return {min_quantity_kg, price_per_kg};
+  });
+  if (!tiers.length || tiers.length > 20) throw new Error('Enter between 1 and 20 price tiers.');
+  const thresholds = tiers.map(tier => Number(tier.min_quantity_kg));
+  if (new Set(thresholds).size !== thresholds.length) throw new Error('Each tier must have a different minimum quantity.');
+  return tiers;
+}
+
+async function submitOfferForm(form, url, method, feedback) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  data.tiers = parseTiers(data.tiers_text);
+  delete data.tiers_text;
+  if (Object.hasOwn(data, 'active')) data.active = data.active === 'true';
+  const response = await fetch(url, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Could not save offer.');
+  location.reload();
+}
+
+document.querySelector('#offer-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const feedback = document.querySelector('#offer-feedback');
+  feedback.textContent = '';
+  try { await submitOfferForm(event.currentTarget, '/api/offers', 'POST', feedback); }
+  catch (error) { feedback.textContent = error.message; }
+});
+
+document.querySelectorAll('.edit-toggle').forEach(button => button.addEventListener('click', () => {
+  const form = document.getElementById(button.getAttribute('aria-controls'));
+  const open = form.hidden;
+  form.hidden = !open;
+  button.setAttribute('aria-expanded', String(open));
+  button.textContent = open ? 'Close editor' : 'Edit';
+}));
+
+document.querySelectorAll('.cancel-edit').forEach(button => button.addEventListener('click', () => {
+  const form = button.closest('form');
+  form.hidden = true;
+  const toggle = document.querySelector(`[aria-controls="${form.id}"]`);
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'Edit';
+}));
+
+document.querySelectorAll('.offer-edit-form').forEach(form => form.addEventListener('submit', async event => {
+  event.preventDefault();
+  const feedback = form.querySelector('.edit-feedback');
+  feedback.textContent = '';
+  try { await submitOfferForm(form, `/api/offers/${form.dataset.offerId}`, 'PATCH', feedback); }
+  catch (error) { feedback.textContent = error.message; }
+}));
+</script>
+{% endblock %}
