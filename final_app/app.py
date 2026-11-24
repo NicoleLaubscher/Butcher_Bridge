@@ -1,22 +1,33 @@
-"""ButcherBridge final-exam application; share one hosted MySQL database."""
 import logging
 import os
 from datetime import date
 from decimal import Decimal
-from flask import Flask, jsonify, render_template, request, session, redirect, url_for
+from functools import wraps
+from logging.handlers import RotatingFileHandler
+
 from dotenv import load_dotenv
+from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from pymysql.err import IntegrityError
 from werkzeug.exceptions import HTTPException
+
 from db import query, read_snapshot, transaction
 from decision_engine import compare_plans, evaluate_optimised_plan, evaluate_plan
 from group_formation_planner import GroupPlanningLimits
 from scenario_routes import scenarios
-from config import config_by_name
-from functools import wraps
+
+try:
+    from config import config_by_name
+except ImportError:
+    class _FallbackConfig:
+        SECRET_KEY = None
+    config_by_name = {'development': _FallbackConfig}
 
 load_dotenv(override=True)
-app=Flask(__name__)
+app = Flask(__name__)
 app.config.from_object(config_by_name.get(os.getenv('APP_ENV', 'development'), config_by_name['development']))
+if not app.config.get('SECRET_KEY'):
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+
 group_planning_defaults = GroupPlanningLimits()
 app.config.from_mapping(
     GROUP_PLANNING_MAX_RETAILERS=os.getenv(
@@ -29,14 +40,15 @@ app.config.from_mapping(
         'GROUP_PLANNING_MAX_SEARCH_NODES', group_planning_defaults.max_search_nodes,
     ),
 )
-logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
-from logging.handlers import RotatingFileHandler
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 os.makedirs('logs', exist_ok=True)
 _file_log = RotatingFileHandler('logs/app.log', maxBytes=1_000_000, backupCount=3, encoding='utf-8')
 _file_log.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
 logging.getLogger().addHandler(_file_log)
 
 app.register_blueprint(scenarios)
+
 ORDER_DETAILS = '''SELECT d.*,r.name AS retailer_name,p.name AS product_name,p.specification,
         w.label AS window_label FROM demand_orders d JOIN retailers r ON r.id=d.retailer_id
         JOIN products p ON p.id=d.product_id JOIN order_windows w ON w.id=d.window_id'''
@@ -48,25 +60,28 @@ ALLOCATIONS = 'SELECT offer_id, window_id, quantity_kg, status FROM allocations'
 
 def require_login(fn):
     @wraps(fn)
-    def inner(*args,**kwargs):
+    def inner(*args, **kwargs):
         if not session.get('signed_in'):
             if request.path.startswith('/api/'):
-                return jsonify(error='Sign in first'),401
+                return jsonify(error='Sign in first'), 401
             return redirect(url_for('login'))
-        return fn(*args,**kwargs)
+        return fn(*args, **kwargs)
     return inner
 
-@app.route('/login',methods=['GET','POST'])
+
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    error=None
-    if request.method=='POST':
+    error = None
+    if request.method == 'POST':
         from hmac import compare_digest
-        password=os.getenv('APP_PASSWORD','')
-        if password and compare_digest(request.form.get('password',''),password):
-            session.clear(); session['signed_in']=True
+        password = os.getenv('APP_PASSWORD', '')
+        if password and compare_digest(request.form.get('password', ''), password):
+            session.clear()
+            session['signed_in'] = True
             return redirect(url_for('home'))
-        error='Incorrect demo password'
-    return render_template('login.html',error=error)
+        error = 'Incorrect demo password'
+    return render_template('login.html', error=error)
+
 
 @app.post('/logout')
 def logout():
@@ -75,16 +90,19 @@ def logout():
 
 
 def lookup_data():
-    return {'retailers':query('SELECT id,name,area FROM retailers ORDER BY name'),
-            'products':query('SELECT id,name,specification FROM products ORDER BY name'),
-            'windows':query('SELECT id,label,closes_at,status FROM order_windows ORDER BY id'),
-            'suppliers':query('SELECT id,name,service_area FROM suppliers ORDER BY name')}
+    return {'retailers': query('SELECT id,name,area FROM retailers ORDER BY name'),
+            'products': query('SELECT id,name,specification FROM products ORDER BY name'),
+            'windows': query('SELECT id,label,closes_at,status FROM order_windows ORDER BY id'),
+            'suppliers': query('SELECT id,name,service_area FROM suppliers ORDER BY name')}
+
 
 def all_orders():
     return query(ORDER_DETAILS + ' ORDER BY d.id DESC')
 
+
 def all_offers():
     return query(OFFER_DETAILS)
+
 
 def decision_results(*, optimised=False):
     orders = all_orders()
@@ -100,13 +118,16 @@ def decision_results(*, optimised=False):
 
 def group_planning_limits():
     try:
-        return GroupPlanningLimits(
-            max_retailers_per_bucket=int(str(app.config['GROUP_PLANNING_MAX_RETAILERS'])),
-            max_quote_evaluations=int(str(app.config['GROUP_PLANNING_MAX_QUOTE_EVALUATIONS'])),
-            max_search_nodes=int(str(app.config['GROUP_PLANNING_MAX_SEARCH_NODES'])),
-        )
+        values = {
+            'max_retailers_per_bucket': int(str(app.config['GROUP_PLANNING_MAX_RETAILERS'])),
+            'max_quote_evaluations': int(str(app.config['GROUP_PLANNING_MAX_QUOTE_EVALUATIONS'])),
+            'max_search_nodes': int(str(app.config['GROUP_PLANNING_MAX_SEARCH_NODES'])),
+        }
     except ValueError:
         raise ValueError('Retailer grouping limits must be nonnegative integers.') from None
+    if any(v < 0 for v in values.values()):
+        raise ValueError('Retailer grouping limits must be nonnegative integers.')
+    return GroupPlanningLimits(**values)
 
 
 def comparison_results(*, include_metrics=False):
@@ -124,24 +145,26 @@ def comparison_results(*, include_metrics=False):
 
 def dashboard_metrics(read=None):
     read = query if read is None else read
-    stats=read('''SELECT COUNT(*) AS order_count,COALESCE(SUM(CASE WHEN status='committed' THEN quantity_kg ELSE 0 END),0) AS committed_kg FROM demand_orders''')[0]
-    fulfil=read('''SELECT COUNT(*) AS n, COALESCE(SUM(f.delivered_kg),0) AS delivered,COALESCE(SUM(o.quantity_kg),0) AS ordered,
+    stats = read('''SELECT COUNT(*) AS order_count,COALESCE(SUM(CASE WHEN status='committed' THEN quantity_kg ELSE 0 END),0) AS committed_kg FROM demand_orders''')[0]
+    fulfil = read('''SELECT COUNT(*) AS n, COALESCE(SUM(f.delivered_kg),0) AS delivered,COALESCE(SUM(o.quantity_kg),0) AS ordered,
        COALESCE(SUM(CASE WHEN f.actual_days<=f.planned_days THEN 1 ELSE 0 END),0) AS on_time,
        COALESCE(SUM(CASE WHEN f.actual_days<=f.planned_days AND f.delivered_kg>=o.quantity_kg THEN 1 ELSE 0 END),0) AS otif
        FROM fulfilments f JOIN demand_orders o ON o.id=f.demand_order_id''')[0]
-    n=int(fulfil['n']); ordered=float(fulfil['ordered'])
-    return {'orders':int(stats['order_count']), 'committed_kg':float(stats['committed_kg']),
-            'fill_pct':round(float(fulfil['delivered'])/ordered*100,1) if ordered else None,
-            'on_time_pct':round(int(fulfil['on_time'])/n*100,1) if n else None,
-            'otif_pct':round(int(fulfil['otif'])/n*100,1) if n else None}
+    n = int(fulfil['n'])
+    ordered = float(fulfil['ordered'])
+    return {'orders': int(stats['order_count']), 'committed_kg': float(stats['committed_kg']),
+            'fill_pct': round(float(fulfil['delivered']) / ordered * 100, 1) if ordered else None,
+            'on_time_pct': round(int(fulfil['on_time']) / n * 100, 1) if n else None,
+            'otif_pct': round(int(fulfil['otif']) / n * 100, 1) if n else None}
 
 
 @app.template_filter('rand_amount')
 def rand_amount(value):
-    amount = Decimal(value)
+    amount = Decimal(str(value))
     sign = '-' if amount < 0 else ''
     whole, _, fraction = format(abs(amount), ',f').partition('.')
     return f"{sign}R{whole}.{fraction.rstrip('0').ljust(2, '0')}"
+
 
 @app.patch('/api/offers/<int:offer_id>')
 @require_login
@@ -231,6 +254,7 @@ def home():
     return render_template('dashboard.html', batches=plans[mode], metrics=metrics,
                            comparison=comparison, mode=mode)
 
+
 @app.get('/orders')
 @require_login
 def orders_page():
@@ -243,10 +267,12 @@ def orders_page():
     return render_template('orders.html', orders=all_orders(),
                            editable_window_ids=editable_window_ids, **lookups)
 
+
 @app.get('/offers')
 @require_login
 def offers_page():
-    offers=all_offers(); tiers=query('SELECT * FROM price_tiers ORDER BY offer_id,min_quantity_kg')
+    offers = all_offers()
+    tiers = query('SELECT * FROM price_tiers ORDER BY offer_id,min_quantity_kg')
     tiers_by_offer = {}
     for tier in tiers:
         tiers_by_offer.setdefault(tier['offer_id'], []).append(tier)
@@ -255,150 +281,211 @@ def offers_page():
             f"{tier['min_quantity_kg']}:{tier['price_per_kg']}"
             for tier in tiers_by_offer.get(offer['id'], [])
         )
-    return render_template('offers.html',offers=offers,tiers=tiers,**lookup_data())
+    return render_template('offers.html', offers=offers, tiers=tiers, **lookup_data())
+
 
 @app.get('/fulfilment')
 @require_login
 def fulfilment_page():
-    rows=query("SELECT d.id,r.name AS retailer_name,d.quantity_kg FROM demand_orders d JOIN retailers r ON r.id=d.retailer_id WHERE d.status='committed' ORDER BY d.id")
-    return render_template('fulfilment.html',orders=rows,metrics=dashboard_metrics())
+    rows = query("SELECT d.id,r.name AS retailer_name,d.quantity_kg FROM demand_orders d JOIN retailers r ON r.id=d.retailer_id WHERE d.status='committed' ORDER BY d.id")
+    return render_template('fulfilment.html', orders=rows, metrics=dashboard_metrics())
+
 
 @app.get('/methodology')
 @require_login
-def methodology(): return render_template('methodology.html')
+def methodology():
+    return render_template('methodology.html')
 
 
 def body():
-    data=request.get_json(silent=True)
-    if not isinstance(data,dict): raise ValueError('Expected a JSON object')
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise ValueError('Expected a JSON object')
     return data
 
-def positive(data,key):
-    try: n=Decimal(str(data[key]))
-    except (KeyError,ValueError,TypeError,ArithmeticError): raise ValueError(f'{key} must be a number')
-    if not n.is_finite() or n<=0: raise ValueError(f'{key} must be positive')
+
+def positive(data, key):
+    try:
+        n = Decimal(str(data[key]))
+    except (KeyError, ValueError, TypeError, ArithmeticError):
+        raise ValueError(f'{key} must be a number')
+    if not n.is_finite() or n <= 0:
+        raise ValueError(f'{key} must be positive')
     return n
 
-def nonnegative(data,key,default=0):
-    try: n=Decimal(str(data.get(key,default)))
-    except (ValueError,TypeError,ArithmeticError): raise ValueError(f'{key} must be a number')
-    if not n.is_finite() or n<0: raise ValueError(f'{key} cannot be negative')
+
+def nonnegative(data, key, default=0):
+    try:
+        n = Decimal(str(data.get(key, default)))
+    except (ValueError, TypeError, ArithmeticError):
+        raise ValueError(f'{key} must be a number')
+    if not n.is_finite() or n < 0:
+        raise ValueError(f'{key} cannot be negative')
     return n
 
-def identifier(data,key):
-    try: n=int(data[key])
-    except (KeyError,TypeError,ValueError): raise ValueError(f'{key} is required as an integer')
-    if n<=0: raise ValueError(f'{key} must be positive')
+
+def identifier(data, key):
+    try:
+        n = int(data[key])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError(f'{key} is required as an integer')
+    if n <= 0:
+        raise ValueError(f'{key} must be positive')
     return n
+
 
 def order_payload(d):
-    try: needed=date.fromisoformat(str(d['needed_date']))
-    except (KeyError,ValueError): raise ValueError('needed_date must be YYYY-MM-DD')
-    if needed<date.today(): raise ValueError('needed_date cannot be in the past')
-    area=str(d.get('delivery_area','')).strip()
-    if not area or len(area)>100: raise ValueError('delivery_area is required (max 100 chars)')
-    status=str(d.get('status','draft'))
-    if status not in ('draft','committed','withdrawn'): raise ValueError('Invalid status')
-    evidence=str(d.get('evidence_type','simulated'))
-    if evidence not in ('primary','quoted','estimated','simulated'): raise ValueError('Invalid evidence type')
-    return (identifier(d,'retailer_id'),identifier(d,'product_id'),identifier(d,'window_id'),needed.isoformat(),
-            area,positive(d,'quantity_kg'),nonnegative(d,'baseline_price_per_kg'),nonnegative(d,'baseline_logistics_cost'),
-            int(nonnegative(d,'baseline_trips',1)),nonnegative(d,'baseline_distance_km'),status,evidence,str(d.get('evidence_note',''))[:500])
+    try:
+        needed = date.fromisoformat(str(d['needed_date']))
+    except (KeyError, ValueError):
+        raise ValueError('needed_date must be YYYY-MM-DD')
+    if needed < date.today():
+        raise ValueError('needed_date cannot be in the past')
+    area = str(d.get('delivery_area', '')).strip()
+    if not area or len(area) > 100:
+        raise ValueError('delivery_area is required (max 100 chars)')
+    status = str(d.get('status', 'draft'))
+    if status not in ('draft', 'committed', 'withdrawn'):
+        raise ValueError('Invalid status')
+    evidence = str(d.get('evidence_type', 'simulated'))
+    if evidence not in ('primary', 'quoted', 'estimated', 'simulated'):
+        raise ValueError('Invalid evidence type')
+    return (identifier(d, 'retailer_id'), identifier(d, 'product_id'), identifier(d, 'window_id'), needed.isoformat(),
+            area, positive(d, 'quantity_kg'), nonnegative(d, 'baseline_price_per_kg'), nonnegative(d, 'baseline_logistics_cost'),
+            int(nonnegative(d, 'baseline_trips', 1)), nonnegative(d, 'baseline_distance_km'), status, evidence,
+            str(d.get('evidence_note', ''))[:500])
+
 
 @app.get('/api/offers')
 @require_login
 def api_offers():
     try:
-        page = int(request.args.get('page', '1')); size = int(request.args.get('size', '20'))
+        page = int(request.args.get('page', '1'))
+        size = int(request.args.get('size', '20'))
     except ValueError:
-        raise ValueError('page and size must be whole numbers')
-    if not 1 <= page <= 100000 or not 1 <= size <= 100:
-        raise ValueError('page must be positive and size between 1 and 100')
-    supplier_id = request.args.get('supplier_id', '')
-    if supplier_id and not supplier_id.isdigit():
-        raise ValueError('supplier_id must be a whole number')
-    where = ' WHERE o.supplier_id=%s' if supplier_id else ''
-    rows = query('''SELECT o.*,s.name AS supplier_name,s.service_area FROM supplier_offers o
-                    JOIN suppliers s ON s.id=o.supplier_id''' + where +
-                 ' ORDER BY o.id LIMIT %s OFFSET %s',
-                 ([int(supplier_id)] if supplier_id else []) + [size, (page - 1) * size])
+        return jsonify(error='page and size must be whole numbers'), 400
+
+    if not (1 <= page <= 100000) or not (1 <= size <= 100):
+        return jsonify(error='page must be between 1 and 100000, and size between 1 and 100'), 400
+
+    supplier_id_raw = request.args.get('supplier_id', '').strip()
+    params = []
+    where = ''
+
+    if supplier_id_raw:
+        if not supplier_id_raw.isdigit():
+            return jsonify(error='supplier_id must be a whole number'), 400
+        supplier_id = int(supplier_id_raw)
+        where = ' WHERE o.supplier_id = %s'
+        params.append(supplier_id)
+
+    sql = (
+        'SELECT o.*, s.name AS supplier_name, s.service_area '
+        'FROM supplier_offers o '
+        'JOIN suppliers s ON s.id = o.supplier_id'
+        + where +
+        ' ORDER BY o.id LIMIT %s OFFSET %s'
+    )
+    params.extend([size, (page - 1) * size])
+
+    rows = query(sql, params)
     return jsonify(items=rows, page=page, size=size)
+
 
 @app.get('/api/orders/<int:oid>')
 @require_login
 def api_order(oid):
-    rows=query('SELECT * FROM demand_orders WHERE id=%s',(oid,))
-    return (jsonify(rows[0]),200) if rows else (jsonify(error='Order not found'),404)
+    rows = query('SELECT * FROM demand_orders WHERE id=%s', (oid,))
+    return (jsonify(rows[0]), 200) if rows else (jsonify(error='Order not found'), 404)
+
 
 @app.post('/api/orders')
 @require_login
 def api_create_order():
-    vals=order_payload(body())
+    vals = order_payload(body())
     with transaction() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT status,closes_at FROM order_windows WHERE id=%s FOR UPDATE',(vals[2],))
-            window=cur.fetchone()
-            if not window or window['status']!='open' or window['closes_at'].date()<date.today(): raise ValueError('Order window is not open')
+            cur.execute('SELECT status,closes_at FROM order_windows WHERE id=%s FOR UPDATE', (vals[2],))
+            window = cur.fetchone()
+            if not window or window['status'] != 'open' or window['closes_at'].date() < date.today():
+                raise ValueError('Order window is not open')
             cur.execute('''INSERT INTO demand_orders (retailer_id,product_id,window_id,needed_date,delivery_area,quantity_kg,baseline_price_per_kg,baseline_logistics_cost,baseline_trips,baseline_distance_km,status,evidence_type,evidence_note)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',vals)
-            new_id=cur.lastrowid
-    return jsonify(id=new_id,message='Order saved'),201
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''', vals)
+            new_id = cur.lastrowid
+    return jsonify(id=new_id, message='Order saved'), 201
+
 
 @app.patch('/api/orders/<int:oid>')
 @require_login
 def api_update_order(oid):
-    data=body()
-    allowed={'quantity_kg','baseline_price_per_kg','baseline_logistics_cost','status','evidence_note'}
-    if not data or set(data)-allowed: raise ValueError('Unsupported or empty update fields')
-    parts=[];params=[]
-    for k,v in data.items():
-        if k=='status':
-            if v not in ('draft','committed','withdrawn'): raise ValueError('Invalid status')
-            parsed=v
-        elif k=='evidence_note': parsed=str(v)[:500]
-        elif k=='quantity_kg': parsed=positive(data,k)
-        else: parsed=nonnegative(data,k)
-        parts.append(k+'=%s');params.append(parsed)
+    data = body()
+    allowed = {'quantity_kg', 'baseline_price_per_kg', 'baseline_logistics_cost', 'status', 'evidence_note'}
+    if not data or set(data) - allowed:
+        raise ValueError('Unsupported or empty update fields')
+    parts = []
+    params = []
+    for k, v in data.items():
+        if k == 'status':
+            if v not in ('draft', 'committed', 'withdrawn'):
+                raise ValueError('Invalid status')
+            parsed = v
+        elif k == 'evidence_note':
+            parsed = str(v)[:500]
+        elif k == 'quantity_kg':
+            parsed = positive(data, k)
+        else:
+            parsed = nonnegative(data, k)
+        parts.append(k + '=%s')
+        params.append(parsed)
     with transaction() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT d.id,d.status,w.status AS window_status,w.closes_at FROM demand_orders d JOIN order_windows w ON w.id=d.window_id WHERE d.id=%s FOR UPDATE',(oid,))
-            current=cur.fetchone()
-            if not current: return jsonify(error='Order not found'),404
-            if current['status']=='fulfilled': raise ValueError('Fulfilled orders cannot be changed')
-            if current['window_status']!='open' or current['closes_at'].date()<date.today(): raise ValueError('Order window is closed; withdrawal requires administrator handling')
-            cur.execute('UPDATE demand_orders SET '+','.join(parts)+' WHERE id=%s',params+[oid])
-    return jsonify(id=oid,message='Order updated')
+            cur.execute('SELECT d.id,d.status,w.status AS window_status,w.closes_at FROM demand_orders d JOIN order_windows w ON w.id=d.window_id WHERE d.id=%s FOR UPDATE', (oid,))
+            current = cur.fetchone()
+            if not current:
+                return jsonify(error='Order not found'), 404
+            if current['status'] == 'fulfilled':
+                raise ValueError('Fulfilled orders cannot be changed')
+            if current['window_status'] != 'open' or current['closes_at'].date() < date.today():
+                raise ValueError('Order window is closed; withdrawal requires administrator handling')
+            cur.execute('UPDATE demand_orders SET ' + ','.join(parts) + ' WHERE id=%s', params + [oid])
+    return jsonify(id=oid, message='Order updated')
 
-@app.get('/api/offers')
-@require_login
-def api_offers(): return jsonify(items=all_offers())
 
 @app.post('/api/offers')
 @require_login
 def api_create_offer():
-    d=body();tiers=d.get('tiers')
-    if not isinstance(tiers,list) or not tiers: raise ValueError('Supply at least one price tier')
-    if len(tiers)>20: raise ValueError('Maximum 20 tiers')
-    rows=[]
+    d = body()
+    tiers = d.get('tiers')
+    if not isinstance(tiers, list) or not tiers:
+        raise ValueError('Supply at least one price tier')
+    if len(tiers) > 20:
+        raise ValueError('Maximum 20 tiers')
+    rows = []
     for t in tiers:
-        if not isinstance(t,dict): raise ValueError('Invalid tier')
-        rows.append((positive(t,'min_quantity_kg'),nonnegative(t,'price_per_kg')))
-    if len({x[0] for x in rows})!=len(rows): raise ValueError('Duplicate price tier threshold')
-    fill=nonnegative(d,'fill_rate')
-    if fill>1: raise ValueError('fill_rate must be a fraction from 0 to 1')
-    lead=int(nonnegative(d,'lead_days'))
-    vals=(identifier(d,'supplier_id'),identifier(d,'product_id'),positive(d,'capacity_kg'),lead,fill,
-          nonnegative(d,'fixed_delivery'),nonnegative(d,'variable_delivery_per_kg'),nonnegative(d,'handling_cost'),
-          int(nonnegative(d,'coordinated_trips',1)),nonnegative(d,'coordinated_distance_km'),str(d.get('evidence_type','simulated')),
-          str(d.get('evidence_note',''))[:500])
-    if vals[-2] not in ('primary','quoted','estimated','simulated'): raise ValueError('Invalid evidence type')
+        if not isinstance(t, dict):
+            raise ValueError('Invalid tier')
+        rows.append((positive(t, 'min_quantity_kg'), nonnegative(t, 'price_per_kg')))
+    if len({x[0] for x in rows}) != len(rows):
+        raise ValueError('Duplicate price tier threshold')
+    fill = nonnegative(d, 'fill_rate')
+    if fill > 1:
+        raise ValueError('fill_rate must be a fraction from 0 to 1')
+    lead = int(nonnegative(d, 'lead_days'))
+    vals = (identifier(d, 'supplier_id'), identifier(d, 'product_id'), positive(d, 'capacity_kg'), lead, fill,
+            nonnegative(d, 'fixed_delivery'), nonnegative(d, 'variable_delivery_per_kg'), nonnegative(d, 'handling_cost'),
+            int(nonnegative(d, 'coordinated_trips', 1)), nonnegative(d, 'coordinated_distance_km'),
+            str(d.get('evidence_type', 'simulated')), str(d.get('evidence_note', ''))[:500])
+    if vals[-2] not in ('primary', 'quoted', 'estimated', 'simulated'):
+        raise ValueError('Invalid evidence type')
     with transaction() as conn:
         with conn.cursor() as cur:
             cur.execute('''INSERT INTO supplier_offers (supplier_id,product_id,capacity_kg,lead_days,fill_rate,fixed_delivery,variable_delivery_per_kg,handling_cost,coordinated_trips,coordinated_distance_km,evidence_type,evidence_note)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',vals)
-            new_id=cur.lastrowid
-            cur.executemany('INSERT INTO price_tiers (offer_id,min_quantity_kg,price_per_kg) VALUES (%s,%s,%s)',[(new_id,*r) for r in rows])
-    return jsonify(id=new_id,message='Offer and price tiers saved'),201
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''', vals)
+            new_id = cur.lastrowid
+            cur.executemany('INSERT INTO price_tiers (offer_id,min_quantity_kg,price_per_kg) VALUES (%s,%s,%s)',
+                            [(new_id, *r) for r in rows])
+    return jsonify(id=new_id, message='Offer and price tiers saved'), 201
+
 
 @app.get('/api/decisions')
 @require_login
@@ -415,6 +502,7 @@ def api_decisions():
         **planning,
     )
 
+
 @app.get('/api/decisions/comparison')
 @require_login
 def api_decision_comparison():
@@ -424,50 +512,70 @@ def api_decision_comparison():
 
 @app.get('/api/kpis')
 @require_login
-def api_kpis(): return jsonify(dashboard_metrics())
+def api_kpis():
+    return jsonify(dashboard_metrics())
+
 
 @app.post('/api/allocations')
 @require_login
 def api_allocate():
-    d=body();offer_id=identifier(d,'offer_id');window_id=identifier(d,'window_id');qty=positive(d,'quantity_kg')
+    d = body()
+    offer_id = identifier(d, 'offer_id')
+    window_id = identifier(d, 'window_id')
+    qty = positive(d, 'quantity_kg')
     with transaction() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT capacity_kg FROM supplier_offers WHERE id=%s AND active=1 FOR UPDATE',(offer_id,))
-            offer=cur.fetchone()
-            if not offer: return jsonify(error='Offer not found'),404
-            cur.execute("SELECT COALESCE(SUM(quantity_kg),0) AS used FROM allocations WHERE offer_id=%s AND status='reserved'",(offer_id,))
-            used=cur.fetchone()['used']
-            if Decimal(str(used))+qty>Decimal(str(offer['capacity_kg'])): raise ValueError('Supplier capacity is already allocated')
-            cur.execute('INSERT INTO allocations (offer_id,window_id,quantity_kg) VALUES (%s,%s,%s)',(offer_id,window_id,qty))
-    return jsonify(message='Capacity reserved'),201
+            cur.execute('SELECT capacity_kg FROM supplier_offers WHERE id=%s AND active=1 FOR UPDATE', (offer_id,))
+            offer = cur.fetchone()
+            if not offer:
+                return jsonify(error='Offer not found'), 404
+            cur.execute("SELECT COALESCE(SUM(quantity_kg),0) AS used FROM allocations WHERE offer_id=%s AND status='reserved'", (offer_id,))
+            used = cur.fetchone()['used']
+            if Decimal(str(used)) + qty > Decimal(str(offer['capacity_kg'])):
+                raise ValueError('Supplier capacity is already allocated')
+            cur.execute('INSERT INTO allocations (offer_id,window_id,quantity_kg) VALUES (%s,%s,%s)',
+                        (offer_id, window_id, qty))
+    return jsonify(message='Capacity reserved'), 201
+
 
 @app.post('/api/fulfilments')
 @require_login
 def api_fulfilment():
-    d=body();oid=identifier(d,'demand_order_id'); delivered=nonnegative(d,'delivered_kg')
-    vals=(oid,delivered,int(nonnegative(d,'planned_days')),int(nonnegative(d,'actual_days')),
-          positive(d,'quoted_cost'),nonnegative(d,'actual_cost'))
+    d = body()
+    oid = identifier(d, 'demand_order_id')
+    delivered = nonnegative(d, 'delivered_kg')
+    vals = (oid, delivered, int(nonnegative(d, 'planned_days')), int(nonnegative(d, 'actual_days')),
+            positive(d, 'quoted_cost'), nonnegative(d, 'actual_cost'))
     with transaction() as conn:
         with conn.cursor() as cur:
-            cur.execute('SELECT quantity_kg,status FROM demand_orders WHERE id=%s FOR UPDATE',(oid,))
-            order=cur.fetchone()
-            if not order: return jsonify(error='Order not found'),404
-            if order['status']!='committed': raise ValueError('Only committed orders can be fulfilled')
-            if delivered>order['quantity_kg']: raise ValueError('Delivered quantity cannot exceed ordered quantity')
-            cur.execute('INSERT INTO fulfilments (demand_order_id,delivered_kg,planned_days,actual_days,quoted_cost,actual_cost) VALUES (%s,%s,%s,%s,%s,%s)',vals)
-            cur.execute("UPDATE demand_orders SET status='fulfilled' WHERE id=%s",(oid,))
-    return jsonify(message='Fulfilment saved'),201
+            cur.execute('SELECT quantity_kg,status FROM demand_orders WHERE id=%s FOR UPDATE', (oid,))
+            order = cur.fetchone()
+            if not order:
+                return jsonify(error='Order not found'), 404
+            if order['status'] != 'committed':
+                raise ValueError('Only committed orders can be fulfilled')
+            if delivered > Decimal(str(order['quantity_kg'])):
+                raise ValueError('Delivered quantity cannot exceed ordered quantity')
+            cur.execute('INSERT INTO fulfilments (demand_order_id,delivered_kg,planned_days,actual_days,quoted_cost,actual_cost) VALUES (%s,%s,%s,%s,%s,%s)', vals)
+            cur.execute("UPDATE demand_orders SET status='fulfilled' WHERE id=%s", (oid,))
+    return jsonify(message='Fulfilment saved'), 201
+
 
 @app.errorhandler(ValueError)
-def invalid(exc): return jsonify(error=str(exc)),400
+def invalid(exc):
+    return jsonify(error=str(exc)), 400
+
 
 @app.errorhandler(IntegrityError)
 def integrity(exc):
-    app.logger.warning('Database constraint rejected input: %s',type(exc).__name__)
-    return jsonify(error='Duplicate or invalid related record; check existing IDs and unique constraints'),409
+    app.logger.warning('Database constraint rejected input: %s', type(exc).__name__)
+    return jsonify(error='Duplicate or invalid related record; check existing IDs and unique constraints'), 409
+
 
 @app.errorhandler(404)
-def not_found(exc): return jsonify(error='Route not found'),404
+def not_found(exc):
+    return jsonify(error='Route not found'), 404
+
 
 @app.errorhandler(HTTPException)
 def http_error(exc):
@@ -478,12 +586,14 @@ def http_error(exc):
     response.mimetype = 'application/json'
     return response
 
+
 @app.errorhandler(Exception)
 def server_error(exc):
     app.logger.exception('Unhandled request failure')
-    return jsonify(error='Internal server error; see server logs'),500
+    return jsonify(error='Internal server error; see server logs'), 500
 
-if __name__=='__main__':
+
+if __name__ == '__main__':
     if not app.secret_key or not os.getenv('APP_PASSWORD'):
         raise RuntimeError('Set SECRET_KEY and APP_PASSWORD in .env')
     app.run(debug=False)
